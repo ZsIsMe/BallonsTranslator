@@ -105,7 +105,8 @@ class MainWindow(mainwindow_cls):
 
         if shared.ON_MACOS:
             # https://bugreports.qt.io/browse/QTBUG-133215
-            self.hideSystemTitleBar()
+            if not shared.HEADLESS:
+                self.hideSystemTitleBar()
             self.showMaximized()
 
     def setStyleSheet(self, styleSheet: str) -> None:

@@ -1080,7 +1080,14 @@ class TextBlkItem(QGraphicsTextItem):
         
         align_c = align_tl = align_tr = False
         if self.fontformat.vertical:
-            align_tr = True
+            # 竖向文本的对齐处理
+            alignment = self.fontformat.alignment
+            if alignment == TextAlignment.Left:
+                align_tl = True  # 左对齐 = 顶部对齐
+            elif alignment == TextAlignment.Right:
+                align_tr = True  # 右对齐 = 底部对齐
+            else:
+                align_c = True   # 居中对齐
         else:
             alignment = self.fontformat.alignment
             if alignment == TextAlignment.Left:
@@ -1094,8 +1101,17 @@ class TextBlkItem(QGraphicsTextItem):
             pass
         else:
             dw, dh = (w - old_w) / 2, (h - old_h) / 2
-            if align_tr:
-                dw = -dw
+            if self.fontformat.vertical:
+                # 竖向文本：调整高度方向的对齐
+                if align_tr:  # 右对齐(底部对齐)
+                    dh = -dh
+                elif align_tl:  # 左对齐(顶部对齐)
+                    dh = dh
+                dw = -dw  # 竖向文本默认从右侧开始
+            else:
+                # 横向文本：调整宽度方向的对齐
+                if align_tr:
+                    dw = -dw
             rad = -np.deg2rad(self.rotation())
             c, s = np.cos(rad), np.sin(rad)
             dx = c * dw + s * dh
