@@ -25,15 +25,15 @@ PUNSET_HALF = {chr(i) for i in range(0x21, 0x7F)}
 # https://www.w3.org/TR/2022/DNOTE-clreq-20220801/#glyphs_sizes_and_positions_in_character_faces_of_punctuation_marks
 PUNSET_PAUSEORSTOP = {'。', '．', '，', '、', '·', '：', '；', '！', '？'}     # dont need to rotate, 
 PUNSET_ALIGNCENTER = {'。', '．', '，', '、', '·'}
-PUNSET_BRACKETL = {'「', '『', '"', '‘', '（', '《', '〈', '【', '〖', '〔', '［', '｛', '('}
-PUNSET_BRACKETR = {'」', '』', '"', '’', '）', '》', '〉', '】', '〗', '〕', '］', '｝', ')'}
+PUNSET_BRACKETL = {'「', '『', '“', '‘', '（', '《', '〈', '【', '〖', '〔', '［', '｛', '('}
+PUNSET_BRACKETR = {'」', '』', '”', '’', '）', '》', '〉', '】', '〗', '〕', '］', '｝', ')'}
 PUNSET_BRACKET = PUNSET_BRACKETL.union(PUNSET_BRACKETR)
 
 PUNSET_NONBRACKET = {'⸺', '…', '⋯', '～', '-', '–', '—', '＿', '﹏', '●', '•', '~'}
 PUNSET_VERNEEDROTATE = PUNSET_NONBRACKET.union(PUNSET_BRACKET).union(PUNSET_HALF)
 
-PUNSET_ROTATE_ALIGNL = {'」', '』', '"', ''}
-PUNSET_ROTATE_ALIGNR = {'「', '『', '"', ''}
+PUNSET_ROTATE_ALIGNL = {'」', '』', '”', '’'}
+PUNSET_ROTATE_ALIGNR = {'「', '『', '“', '‘'}
 
 Dingbats_vertical_aligncenter = r'\u2700-\u275A\u2761-\u2767\u2776-\u27BF'
 Miscellaneous_Symbols_Pattern = r'\u2600-\u26FF'  # align center in vertical mode
@@ -358,70 +358,7 @@ class VerticalTextDocumentLayout(SceneTextLayout):
 
     @property
     def align_right(self):
-        # 读取文档的对齐设置
-        alignment = self.document().defaultTextOption().alignment()
-        return alignment == Qt.AlignmentFlag.AlignRight
-
-    def _shift_all_blocks_x(self, x_shift: float):
-        """将所有文本块在X轴方向移动指定距离"""
-        doc = self.document()
-        block = doc.firstBlock()
-        while block.isValid():
-            layout = block.layout()
-            for i in range(layout.lineCount()):
-                line = layout.lineAt(i)
-                pos = line.position()
-                pos.setX(pos.x() + x_shift)
-                line.setPosition(pos)
-            block = block.next()
-        
-        # 同时更新相关的偏移列表
-        for i in range(len(self.x_offset_lst)):
-            self.x_offset_lst[i] += x_shift
-        
-        print(f"Text alignment: shifted X by {x_shift:.2f}")
-
-    def _shift_all_blocks_y(self, y_shift: float):
-        """将所有文本块在Y轴方向移动指定距离"""
-        doc = self.document()
-        block = doc.firstBlock()
-        while block.isValid():
-            layout = block.layout()
-            for i in range(layout.lineCount()):
-                line = layout.lineAt(i)
-                pos = line.position()
-                pos.setY(pos.y() + y_shift)
-                line.setPosition(pos)
-            block = block.next()
-        
-        # 同时更新相关的偏移列表
-        for i, y_offset_list in enumerate(self.y_offset_lst):
-            for j, (top, bottom) in enumerate(y_offset_list):
-                self.y_offset_lst[i][j] = [top + y_shift, bottom + y_shift]
-        
-        # 也需要更新line_spaces_lst中的位置信息
-        for block_idx, line_spaces in enumerate(self.line_spaces_lst):
-            for line_idx, (num_rspaces, num_lspaces, char_yoffset_lst, line_pos) in enumerate(line_spaces):
-                # 更新字符位置偏移
-                new_char_yoffset_lst = [y + y_shift for y in char_yoffset_lst]
-                self.line_spaces_lst[block_idx][line_idx] = [num_rspaces, num_lspaces, new_char_yoffset_lst, line_pos]
-        
-        print(f"Text alignment: shifted Y by {y_shift:.2f}")
-
-    def _calculate_total_content_height(self):
-        """计算所有文本内容的总高度"""
-        if not self.y_offset_lst:
-            return 0
-        
-        min_y = float('inf')
-        max_y = float('-inf')
-        
-        for block_offsets in self.y_offset_lst:
-            for top, bottom in block_offsets:
-                min_y = min(min_y, top)
-                max_y = max(max_y, bottom)
-        
-        return max_y - min_y if min_y != float('inf') else 0
+        return False
 
     def reLayout(self):
         self.min_height = 0
@@ -464,138 +401,8 @@ class VerticalTextDocumentLayout(SceneTextLayout):
                     block = block.next()
                 for ii, xoffset in enumerate(self.x_offset_lst):
                     self.x_offset_lst[ii] = xoffset + x_shift
-
-        # 添加对齐处理逻辑
-        alignment = doc.defaultTextOption().alignment()
-        
-        # 计算文本在水平方向的边界
-        actual_text_width = 0
-        text_start_x = 0
-        if self.x_offset_lst and len(self.x_offset_lst) > 1:
-            # 文本的左边界是最右侧的x_offset，右边界是最左侧的x_offset
-            min_x = min(self.x_offset_lst)
-            max_x = max(self.x_offset_lst) 
-            actual_text_width = max_x - min_x
-            text_start_x = min_x
-        
-        # 计算文本在垂直方向的边界（用于垂直居中）
-        actual_text_height = 0
-        text_start_y = 0
-        if self.y_offset_lst:
-            min_y = float('inf')
-            max_y = float('-inf')
-            
-            # 遍历所有块和行，找到实际的文本边界
-            block = doc.firstBlock()
-            while block.isValid():
-                layout = block.layout()
-                for i in range(layout.lineCount()):
-                    line = layout.lineAt(i)
-                    line_pos = line.position()
-                    line_rect = line.naturalTextRect()
-                    
-                    # 计算这行文本的上下边界
-                    line_top = line_pos.y() + line_rect.top()
-                    line_bottom = line_pos.y() + line_rect.bottom()
-                    
-                    min_y = min(min_y, line_top)
-                    max_y = max(max_y, line_bottom)
-                block = block.next()
-            
-            if min_y != float('inf'):
-                actual_text_height = max_y - min_y
-                text_start_y = min_y
-        
-        # 调试信息
-        print(f"Vertical text alignment: {alignment}")
-        print(f"Container boundaries: X=[{doc_margin:.1f}, {doc_margin + self.available_width:.1f}], Y=[{doc_margin:.1f}, {doc_margin + self.available_height:.1f}]")
-        if actual_text_width > 0:
-            print(f"Text X range: [{text_start_x:.1f}, {text_start_x + actual_text_width:.1f}] (width: {actual_text_width:.1f})")
-        if actual_text_height > 0:
-            print(f"Text Y range: [{text_start_y:.1f}, {text_start_y + actual_text_height:.1f}] (height: {actual_text_height:.1f})")
-        
-        # 处理水平对齐和垂直居中
-        x_shift = 0
-        y_shift = 0
-        
-        # 1. 水平方向对齐处理
-        if actual_text_width > 0:
-            if alignment == Qt.AlignmentFlag.AlignCenter:
-                # 居中对齐：将文本移动到可用宽度的中心
-                target_center = doc_margin + self.available_width / 2
-                current_center = text_start_x + actual_text_width / 2
-                x_shift = target_center - current_center
-                
-                # 确保文本不会超出左右边界
-                new_text_left = text_start_x + x_shift
-                new_text_right = new_text_left + actual_text_width
-                
-                # 检查左边界
-                if new_text_left < doc_margin:
-                    x_shift = doc_margin - text_start_x
-                # 检查右边界
-                elif new_text_right > doc_margin + self.available_width:
-                    x_shift = (doc_margin + self.available_width) - (text_start_x + actual_text_width)
-                
-                print(f"Center alignment: X shifting by {x_shift:.2f}")
-                
-            elif alignment == Qt.AlignmentFlag.AlignRight:
-                # 右对齐：将文本移动到右侧，但不超出边界
-                target_right = doc_margin + self.available_width
-                current_right = text_start_x + actual_text_width
-                x_shift = target_right - current_right
-                
-                # 确保文本不会超出左边界
-                new_text_left = text_start_x + x_shift
-                if new_text_left < doc_margin:
-                    x_shift = doc_margin - text_start_x
-                
-                print(f"Right alignment: X shifting by {x_shift:.2f}")
-                
-            elif alignment == Qt.AlignmentFlag.AlignLeft:
-                # 左对齐：将文本移动到左侧，但不超出边界
-                target_left = doc_margin
-                x_shift = target_left - text_start_x
-                
-                # 确保文本不会超出右边界
-                new_text_right = text_start_x + actual_text_width + x_shift
-                if new_text_right > doc_margin + self.available_width:
-                    x_shift = (doc_margin + self.available_width) - (text_start_x + actual_text_width)
-                
-                print(f"Left alignment: X shifting by {x_shift:.2f}")
-        
-        # 2. 垂直方向处理（优先保证文本可见性）
-        if actual_text_height > 0:
-            # 检查文本是否能完全放入容器
-            text_fits_in_container = actual_text_height <= self.available_height
-            
-            if text_fits_in_container:
-                # 文本能完全放入容器时，进行垂直居中
-                target_center_y = doc_margin + self.available_height / 2
-                current_center_y = text_start_y + actual_text_height / 2
-                y_shift = target_center_y - current_center_y
-                print(f"Text fits in container - Vertical center: Y shifting by {y_shift:.2f}")
-            else:
-                # 文本超出容器时，确保从顶部开始显示，保证文本开头可见
-                target_top = doc_margin
-                y_shift = target_top - text_start_y
-                print(f"Text exceeds container - Aligning to top: Y shifting by {y_shift:.2f}")
-                
-                # 可以添加一个小的偏移，让文本稍微向下移动一点，避免贴着边界
-                padding_offset = min(10, self.available_height * 0.05)  # 5%的内边距或10像素
-                y_shift += padding_offset
-                print(f"Added padding offset: final Y shift = {y_shift:.2f}")
-        
-        # 应用位移
-        if x_shift != 0:
-            self._shift_all_blocks_x(x_shift)
-        
-        if y_shift != 0:
-            self._shift_all_blocks_y(y_shift)
-        
-        # 重新计算绘制偏移
-        if x_shift != 0 or y_shift != 0:
-            self.updateDrawOffsets()
+        self.updateDrawOffsets()
+        self.documentSizeChanged.emit(QSizeF(self.max_width, self.max_height))
 
     def updateDrawOffsets(self):
         if self._is_painting_stroke and len(self._draw_offset) > 0:
