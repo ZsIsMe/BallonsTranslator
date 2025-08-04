@@ -409,6 +409,9 @@ class ProjImgTrans:
     def doc_path(self) -> str:
         return os.path.join(self.directory, self.proj_name() + ".docx")
 
+    def doc_labelplus_path(self) -> str:
+        return os.path.join(self.directory, self.proj_name() + "_labelplus.docx")
+
     def doc_exist(self) -> bool:
         return osp.exists(self.doc_path())
 
@@ -451,6 +454,65 @@ class ProjImgTrans:
                 # time.sleep(1)
 
         doc_path = self.doc_path()
+        document.save(doc_path)
+        if delete_tmp_folder:
+            shutil.rmtree(cuts_dir)
+
+    def dump_doc_labelplus(self, delete_tmp_folder=True, fin_page_signal=None):
+        
+        cuts_dir = os.path.join(self.directory, "bubcuts_labelplus")
+        if os.path.exists(cuts_dir):
+            shutil.rmtree(cuts_dir)
+        os.mkdir(cuts_dir)
+        
+        document = Document()
+        style = document.styles['Normal']
+        font = style.font
+        target_font = 'Arial'
+        font.name = target_font
+        for pagename, blklist in self.pages.items():
+            imgpath = os.path.join(self.directory, pagename)
+            
+            # 獲取圖片尺寸用於計算標準化座標
+            img = imread(imgpath)
+            img_height, img_width = img.shape[:2]
+            
+            cuts_path_list, cut_width_list = gen_ballon_cuts(cuts_dir, imgpath, blklist)
+            paragraph = document.add_paragraph(pagename)
+            paragraph.style = document.styles['Normal']
+            table = document.add_table(rows=len(cuts_path_list), cols=5, style='Table Grid')
+
+            for index, (cut_path, width) in enumerate(zip(cuts_path_list, cut_width_list)):
+                run = table.cell(index, 0).paragraphs[0].add_run()
+                run.style.font.name = target_font
+                blk: TextBlock = blklist[index]
+                bubdict = vars(blk).copy()
+                bubdict["imgkey"] = pagename
+                bubdict["rich_text"] = ''
+                bubdict["text"] = blk.get_text()
+                write_jpg_metadata(cut_path, metadata=json.dumps(bubdict, ensure_ascii=False, cls=TextBlkEncoder))
+                run.add_picture(cut_path, width=Inches(width/96 * 0.85))
+                table.cell(index, 1).text = bubdict["translation"]
+                # 添加xyxy列
+                xyxy_text = str(blk.xyxy)
+                table.cell(index, 2).text = xyxy_text
+                # 添加矩形中心標準化座標列
+                x1, y1, x2, y2 = blk.xyxy
+                x_center_norm = (x1 + x2) / 2 / img_width
+                y_center_norm = (y1 + y2) / 2 / img_height
+                center_norm = f"[{x_center_norm:.4f},{y_center_norm:.4f}]"
+                table.cell(index, 3).text = center_norm
+                # 添加文字方向列
+                text_direction = "vertical" if blk.vertical else "horizontal"
+                table.cell(index, 4).text = text_direction
+
+            document.add_page_break()
+            
+            if fin_page_signal is not None:
+                fin_page_signal.emit()
+                # time.sleep(1)
+
+        doc_path = self.doc_labelplus_path()
         document.save(doc_path)
         if delete_tmp_folder:
             shutil.rmtree(cuts_dir)

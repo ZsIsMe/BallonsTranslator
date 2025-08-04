@@ -467,6 +467,19 @@
     </message>
 </context>
 <context>
+    <name>ExportDocLabelPlusThread</name>
+    <message>
+        <location filename="../ui/io_thread.py" line="130"/>
+        <source>Export as doc (LabelPlus)...</source>
+        <translation>导出word文档（LabelPlus）...</translation>
+    </message>
+    <message>
+        <location filename="../ui/io_thread.py" line="136"/>
+        <source>Overwrite </source>
+        <translation>覆盖</translation>
+    </message>
+</context>
+<context>
     <name>FontFormatPanel</name>
     <message>
         <location filename="../ui/text_panel.py" line="262"/>
@@ -825,6 +838,11 @@
         <location filename="../ui/mainwindowbars.py" line="99"/>
         <source>Export as Doc</source>
         <translation>导出为word文档</translation>
+    </message>
+    <message>
+        <location filename="../ui/mainwindowbars.py" line="101"/>
+        <source>Export as Doc (LabelPlus)</source>
+        <translation>导出为word文档（LabelPlus）</translation>
     </message>
     <message>
         <location filename="../ui/mainwindowbars.py" line="101"/>

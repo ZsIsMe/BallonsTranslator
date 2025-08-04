@@ -28,7 +28,7 @@ from .textedit_area import SourceTextEdit, SelectTextMiniMenu, TransTextEdit
 from .drawingpanel import DrawingPanel
 from .scenetext_manager import SceneTextManager, TextPanel, PasteSrcItemsCommand
 from .mainwindowbars import TitleBar, LeftBar, BottomBar
-from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread
+from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread, ExportDocLabelPlusThread
 from .custom_widget import Widget, ViewWidget
 from .global_search_widget import GlobalSearchWidget
 from .textedit_commands import GlobalRepalceAllCommand
@@ -113,6 +113,7 @@ class MainWindow(mainwindow_cls):
         self.imgtrans_progress_msgbox.setStyleSheet(styleSheet)
         self.export_doc_thread.progress_bar.setStyleSheet(styleSheet)
         self.import_doc_thread.progress_bar.setStyleSheet(styleSheet)
+        self.export_doc_labelplus_thread.progress_bar.setStyleSheet(styleSheet)
         return super().setStyleSheet(styleSheet)
 
     def setupThread(self):
@@ -121,6 +122,8 @@ class MainWindow(mainwindow_cls):
         self.export_doc_thread.fin_io.connect(self.on_fin_export_doc)
         self.import_doc_thread = ImportDocThread(self)
         self.import_doc_thread.fin_io.connect(self.on_fin_import_doc)
+        self.export_doc_labelplus_thread = ExportDocLabelPlusThread(self)
+        self.export_doc_labelplus_thread.fin_io.connect(self.on_fin_export_doc_labelplus)
 
     def resetStyleSheet(self, reverse_icon: bool = False):
         theme = 'eva-dark' if pcfg.darkmode else 'eva-light'
@@ -143,6 +146,7 @@ class MainWindow(mainwindow_cls):
         self.leftBar.open_json_proj.connect(self.openJsonProj)
         self.leftBar.save_proj.connect(self.manual_save)
         self.leftBar.export_doc.connect(self.on_export_doc)
+        self.leftBar.export_doc_labelplus.connect(self.on_export_doc_labelplus)
         self.leftBar.import_doc.connect(self.on_import_doc)
         self.leftBar.export_src_txt.connect(lambda : self.on_export_txt(dump_target='source'))
         self.leftBar.export_trans_txt.connect(lambda : self.on_export_txt(dump_target='translation'))
@@ -1342,6 +1346,11 @@ class MainWindow(mainwindow_cls):
             self.st_manager.updateTextBlkList()
         self.export_doc_thread.exportAsDoc(self.imgtrans_proj)
 
+    def on_export_doc_labelplus(self):
+        if self.canvas.text_change_unsaved():
+            self.st_manager.updateTextBlkList()
+        self.export_doc_labelplus_thread.exportAsDocLabelPlus(self.imgtrans_proj)
+
     def on_import_doc(self):
         self.import_doc_thread.importDoc(self.imgtrans_proj)
 
@@ -1409,6 +1418,11 @@ class MainWindow(mainwindow_cls):
     def on_fin_export_doc(self):
         msg = QMessageBox()
         msg.setText(self.tr('Export to ') + self.imgtrans_proj.doc_path())
+        msg.exec_()
+
+    def on_fin_export_doc_labelplus(self):
+        msg = QMessageBox()
+        msg.setText("LabelPlus導出成功！\n保存位置：" + self.imgtrans_proj.doc_labelplus_path())
         msg.exec_()
 
     def on_fin_import_doc(self):

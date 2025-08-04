@@ -1,0 +1,5 @@
+# Word文檔分割與合併工具依賴
+
+python-docx>=0.8.11
+docxcompose>=1.4.0
+docx2txt>=0.8 

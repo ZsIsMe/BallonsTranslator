@@ -127,6 +127,42 @@ class ExportDocThread(ImgTransProjFileIOThread):
         self.fin_io.emit()
 
 
+class ExportDocLabelPlusThread(ImgTransProjFileIOThread):
+
+    _thread_error_msg = 'Failed to export Doc (LabelPlus)'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.progress_bar.setTaskName(self.tr('Export as doc (LabelPlus)...'))
+
+    def exportAsDocLabelPlus(self, proj: ProjImgTrans):
+        doc_path = proj.doc_labelplus_path()
+        if osp.exists(doc_path):
+            msg = QMessageBox()
+            msg.setText(self.tr('Overwrite ') + doc_path + '?')
+            msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            ret = msg.exec_()
+            if ret == QMessageBox.StandardButton.No:
+                return
+        if self.job is None:
+            self.proj = proj
+            self.job = self._export_as_doc_labelplus
+            self.start()
+            self.progress_bar.updateTaskProgress(0)
+            self.progress_bar.show()
+
+    def _export_as_doc_labelplus(self):
+        if self.proj is None:
+            return
+        self.fin_counter = 0
+        self.num_pages = self.proj.num_pages
+        if self.num_pages > 0:
+            self.proj.dump_doc_labelplus(fin_page_signal=self.fin_page)
+        self.proj = None
+        self.progress_bar.hide()
+        self.fin_io.emit()
+
+
 class ImportDocThread(ImgTransProjFileIOThread):
 
     _thread_error_msg = 'Failed to import Doc'

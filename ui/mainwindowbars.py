@@ -98,6 +98,8 @@ class LeftBar(Widget):
 
         actionExportAsDoc = QAction(self.tr("Export as Doc"), self)
         self.export_doc = actionExportAsDoc.triggered
+        actionExportAsDocLabelPlus = QAction(self.tr("Export as Doc (LabelPlus)"), self)
+        self.export_doc_labelplus = actionExportAsDocLabelPlus.triggered
         actionImportFromDoc = QAction(self.tr("Import from Doc"), self)
         self.import_doc = actionImportFromDoc.triggered
 
@@ -123,6 +125,7 @@ class LeftBar(Widget):
         openMenu.addActions([
             actionSaveProj,
             actionExportAsDoc,
+            actionExportAsDocLabelPlus,
             actionImportFromDoc,
             actionExportSrcTxt,
             actionExportTranslationTxt,
