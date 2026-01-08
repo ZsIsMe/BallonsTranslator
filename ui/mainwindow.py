@@ -83,6 +83,7 @@ class MainWindow(mainwindow_cls):
         self.app = app
         self.backup_blkstyles = []
         self._run_imgtrans_wo_textstyle_update = False
+        self._export_json_after_run = False
 
         self.setupThread()
         self.setupUi()
@@ -147,6 +148,7 @@ class MainWindow(mainwindow_cls):
         self.leftBar.save_proj.connect(self.manual_save)
         self.leftBar.export_doc.connect(self.on_export_doc)
         self.leftBar.export_doc_labelplus.connect(self.on_export_doc_labelplus)
+        self.leftBar.export_json_labelplus.connect(self.on_export_json_labelplus)
         self.leftBar.import_doc.connect(self.on_import_doc)
         self.leftBar.export_src_txt.connect(lambda : self.on_export_txt(dump_target='source'))
         self.leftBar.export_trans_txt.connect(lambda : self.on_export_txt(dump_target='translation'))
@@ -377,6 +379,7 @@ class MainWindow(mainwindow_cls):
         module_manager.setInpainter()
 
         self.leftBar.run_imgtrans_clicked.connect(self.run_imgtrans)
+        self.titleBar.run_and_export_trigger.connect(self.on_run_and_export)
 
         self.titleBar.darkModeAction.setChecked(pcfg.darkmode)
 
@@ -1082,6 +1085,9 @@ class MainWindow(mainwindow_cls):
         self.postprocess_mt_toggle = True
         if pcfg.module.empty_runcache and not shared.HEADLESS:
             self.module_manager.unload_all_models()
+        if self._export_json_after_run or (shared.HEADLESS and shared.args.export_json_labelplus):
+            self.on_export_json_labelplus()
+            self._export_json_after_run = False
         if shared.args.export_translation_txt:
             self.on_export_txt('translation')
         if shared.args.export_source_txt:
@@ -1245,12 +1251,17 @@ class MainWindow(mainwindow_cls):
             pcfg.display_lang = lang
             self.set_display_lang(lang)
 
+    def on_run_and_export(self):
+        self._export_json_after_run = True
+        self.run_imgtrans()
+
     def run_imgtrans(self):
         if not self.imgtrans_proj.is_all_pages_no_text and not pcfg.module.keep_exist_textlines:
             reply = QMessageBox.question(self, self.tr('Confirmation'),
                                          self.tr('Are you sure to run image translation again?\nAll existing translation results will be cleared!'),
                                          QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply != QMessageBox.Yes:
+                self._export_json_after_run = False
                 return
         self.on_run_imgtrans()
 
@@ -1350,6 +1361,16 @@ class MainWindow(mainwindow_cls):
         if self.canvas.text_change_unsaved():
             self.st_manager.updateTextBlkList()
         self.export_doc_labelplus_thread.exportAsDocLabelPlus(self.imgtrans_proj)
+
+    def on_export_json_labelplus(self):
+        if self.canvas.text_change_unsaved():
+            self.st_manager.updateTextBlkList()
+        try:
+            self.imgtrans_proj.dump_json_labelplus()
+            path = self.imgtrans_proj.json_labelplus_path()
+            create_info_dialog(f"JSON導出成功！\n保存位置：{path}")
+        except Exception as e:
+            create_error_dialog(e, "Failed to export as LabelPlus JSON")
 
     def on_import_doc(self):
         self.import_doc_thread.importDoc(self.imgtrans_proj)

@@ -412,6 +412,9 @@ class ProjImgTrans:
     def doc_labelplus_path(self) -> str:
         return os.path.join(self.directory, self.proj_name() + "_labelplus.docx")
 
+    def json_labelplus_path(self) -> str:
+        return os.path.join(self.directory, "text_rect.json")
+
     def doc_exist(self) -> bool:
         return osp.exists(self.doc_path())
 
@@ -457,6 +460,7 @@ class ProjImgTrans:
         document.save(doc_path)
         if delete_tmp_folder:
             shutil.rmtree(cuts_dir)
+
 
     def dump_doc_labelplus(self, delete_tmp_folder=True, fin_page_signal=None):
         
@@ -516,6 +520,44 @@ class ProjImgTrans:
         document.save(doc_path)
         if delete_tmp_folder:
             shutil.rmtree(cuts_dir)
+
+    def dump_json_labelplus(self):
+        output_data = {
+            "project_name": self.proj_name(),
+            "export_format": "LabelPlus",
+            "pages": {}
+        }
+
+        for pagename, blklist in self.pages.items():
+            imgpath = os.path.join(self.directory, pagename)
+            img = imread(imgpath)
+            if img is None:
+                continue
+            img_height, img_width = img.shape[:2]
+
+            page_data = []
+            for blk in blklist:
+                # Ensure standard Python types for JSON serialization
+                xyxy = [int(c) for c in blk.xyxy]
+                x1, y1, x2, y2 = xyxy
+                x_center_norm = float((x1 + x2) / 2 / img_width)
+                y_center_norm = float((y1 + y2) / 2 / img_height)
+
+                block_data = {
+                    "xyxy_pixel": xyxy,
+                    "center_normalized": [float(round(x_center_norm, 4)), float(round(y_center_norm, 4))],
+                    "orientation": "vertical" if blk.vertical else "horizontal",
+                    "ocr_text": blk.get_text(),
+                    "font_size": blk.font_size
+                }
+                page_data.append(block_data)
+            
+            output_data["pages"][pagename] = page_data
+
+        save_path = self.json_labelplus_path()
+        with open(save_path, 'w', encoding='utf-8') as f:
+            json.dump(output_data, f, ensure_ascii=False, indent=2, cls=NumpyEncoder)
+
 
     def dump_txt_path(self, dump_target, suffix):
         save_path = osp.join(self.directory, self.proj_name() + f'_{dump_target}{suffix}')

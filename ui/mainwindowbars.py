@@ -100,6 +100,8 @@ class LeftBar(Widget):
         self.export_doc = actionExportAsDoc.triggered
         actionExportAsDocLabelPlus = QAction(self.tr("Export as Doc (LabelPlus)"), self)
         self.export_doc_labelplus = actionExportAsDocLabelPlus.triggered
+        actionExportAsJsonLabelPlus = QAction("輸出文本檢測JSON", self)
+        self.export_json_labelplus = actionExportAsJsonLabelPlus.triggered
         actionImportFromDoc = QAction(self.tr("Import from Doc"), self)
         self.import_doc = actionImportFromDoc.triggered
 
@@ -126,6 +128,7 @@ class LeftBar(Widget):
             actionSaveProj,
             actionExportAsDoc,
             actionExportAsDocLabelPlus,
+            actionExportAsJsonLabelPlus,
             actionImportFromDoc,
             actionExportSrcTxt,
             actionExportTranslationTxt,
@@ -387,15 +390,17 @@ class TitleBar(Widget):
             sa.triggered.connect(self.stageEnableStateChanged)
 
         runAction = QAction(self.tr('Run'), self)
+        runAndExportAction = QAction("運行並輸出文本檢測", self)
         runWoUpdateTextStyle = QAction(self.tr('Run without update textstyle'), self)
         translatePageAction = QAction(self.tr('Translate page'), self)
         runMenu = QMenu(self.runToolBtn)
         runMenu.addActions(stageActions)
         runMenu.addSeparator()
-        runMenu.addActions([runAction, runWoUpdateTextStyle, translatePageAction])
+        runMenu.addActions([runAction, runAndExportAction, runWoUpdateTextStyle, translatePageAction])
         self.runToolBtn.setMenu(runMenu)
         self.runToolBtn.setPopupMode(QToolButton.InstantPopup)
         self.run_trigger = runAction.triggered
+        self.run_and_export_trigger = runAndExportAction.triggered
         self.run_woupdate_textstyle_trigger = runWoUpdateTextStyle.triggered
         self.translate_page_trigger = translatePageAction.triggered
 
