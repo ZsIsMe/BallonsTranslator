@@ -1,12 +1,20 @@
 import json, os, traceback
 import os.path as osp
 import copy
+from typing import Callable
 
 from . import shared
 from .fontformat import FontFormat
 from .structures import List, Dict, Config, field, nested_dataclass
 from .logger import logger as LOGGER
 from .io_utils import json_dump_nested_obj, np, serialize_np
+
+class RunStatus:
+    FIN_DET = 1
+    FIN_OCR = 2
+    FIN_INPAINT = 4
+    FIN_TRANSLATE = 8
+    FIN_ALL = 15
 
 
 @nested_dataclass
@@ -20,6 +28,8 @@ class ModuleConfig(Config):
     enable_ocr: bool = True
     enable_translate: bool = True
     enable_inpaint: bool = True
+    # 是否在 OCR 后进行字体检测（默认不启用）
+    ocr_font_detect: bool = False
     textdetector_params: Dict = field(default_factory=lambda: dict())
     ocr_params: Dict = field(default_factory=lambda: dict())
     translator_params: Dict = field(default_factory=lambda: dict())
@@ -29,6 +39,7 @@ class ModuleConfig(Config):
     check_need_inpaint: bool = True
     load_model_on_demand: bool = False
     empty_runcache: bool = False
+    finish_code: int = 15
 
     def get_params(self, module_key: str, for_saving=False) -> dict:
         d = self[module_key + '_params']
@@ -42,6 +53,8 @@ class ModuleConfig(Config):
             sd[module_key] = saving_module_params
             for pk, pv in module_params.items():
                 if pk in {'description'}:
+                    continue
+                if pk.startswith('__'):
                     continue
                 if isinstance(pv, dict):
                     pv = pv['value']
@@ -72,6 +85,15 @@ class ModuleConfig(Config):
         
     def all_stages_disabled(self):
         return (self.enable_detect or self.enable_ocr or self.enable_translate or self.enable_inpaint) is False
+
+    def __post_init__(self):
+        self.update_finish_code()
+
+    def update_finish_code(self):
+        self.finish_code = self.enable_detect * RunStatus.FIN_DET + \
+            self.enable_ocr * RunStatus.FIN_OCR + \
+                self.enable_translate * RunStatus.FIN_TRANSLATE + \
+                    self.enable_inpaint * RunStatus.FIN_INPAINT
         
 
 @nested_dataclass
@@ -135,6 +157,7 @@ class ProgramConfig(Config):
     display_lang: str = field(default_factory=lambda: shared.DEFAULT_DISPLAY_LANG) # to always apply shared.DEFAULT_DISPLAY_LANG
     imgsave_quality: int = 100
     imgsave_ext: str = '.png'
+    intermediate_imgsave_ext: str = '.png'
     show_text_style_preset: bool = True
     expand_tstyle_panel: bool = True
     show_text_effect_panel: bool = True
@@ -179,7 +202,7 @@ class ProgramConfig(Config):
         return ProgramConfig(**config_dict)
     
 
-pcfg: ProgramConfig = None
+pcfg = ProgramConfig()
 text_styles: List[FontFormat] = []
 active_format: FontFormat = None
 
@@ -227,7 +250,7 @@ def load_config(config_path: str = shared.CONFIG_PATH):
         config = ProgramConfig()
     
     global pcfg
-    pcfg = config
+    pcfg.merge(config)
 
     p = pcfg.text_styles_path
     if not osp.exists(pcfg.text_styles_path):
@@ -255,14 +278,17 @@ def json_dump_program_config(obj, **kwargs):
 def save_config():
     global pcfg
     try:
-        with open(shared.CONFIG_PATH, 'w', encoding='utf8') as f:
+        tmp_save_tgt = shared.CONFIG_PATH + '.tmp'
+        with open(tmp_save_tgt, 'w', encoding='utf8') as f:
             f.write(json_dump_program_config(pcfg))
-        LOGGER.info('Config saved')
-        return True
     except Exception as e:
-        LOGGER.error(f'Failed save config to {shared.CONFIG_PATH}: {e}')
+        LOGGER.error(f'Failed save config to {tmp_save_tgt}: {e}')
         LOGGER.error(traceback.format_exc())
         return False
+    
+    os.replace(tmp_save_tgt, shared.CONFIG_PATH)
+    LOGGER.info('Config saved')
+    return True
 
 def save_text_styles(raise_exception = False):
     global pcfg, text_styles
@@ -270,13 +296,17 @@ def save_text_styles(raise_exception = False):
         style_dir = osp.dirname(pcfg.text_styles_path)
         if not osp.exists(style_dir):
             os.makedirs(style_dir)
-        with open(pcfg.text_styles_path, 'w', encoding='utf8') as f:
+        tmp_save_tgt = pcfg.text_styles_path + '.tmp'
+        with open(tmp_save_tgt, 'w', encoding='utf8') as f:
             f.write(json_dump_nested_obj(text_styles))
-        LOGGER.info('Text style saved')
-        return True
+
     except Exception as e:
-        LOGGER.error(f'Failed save text style to {pcfg.text_styles_path}: {e}')
+        LOGGER.error(f'Failed save text style to {tmp_save_tgt}: {e}')
         LOGGER.error(traceback.format_exc())
         if raise_exception:
             raise e
         return False
+
+    os.replace(tmp_save_tgt, pcfg.text_styles_path)
+    LOGGER.info('Text style saved')
+    return True
