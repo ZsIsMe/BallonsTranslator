@@ -391,6 +391,17 @@ class RowIndexLabel(QStackedWidget):
         return super().mousePressEvent(e)
  
 
+class DetectedFontLabel(QLineEdit):
+    """只讀的字體名稱顯示控件，可複製但不可編輯"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setFrame(False)
+        self.setStyleSheet("QLineEdit { background: transparent; color: #888888; font-size: 11px; padding: 0px; margin: 0px; }")
+        self.setFixedHeight(16)
+        self.setPlaceholderText("")
+
+
 class TransPairWidget(Widget):
 
     check_state_changed = Signal(object, bool, bool)
@@ -408,8 +419,14 @@ class TransPairWidget(Widget):
         self.textblock = textblock
         self.idx = idx
         self.checked = False
+        
+        # 顯示識別的字體名稱
+        self.detected_font_label = DetectedFontLabel(self)
+        self.updateDetectedFontName()
+        
         vlayout = QVBoxLayout()
         vlayout.setAlignment(Qt.AlignTop)
+        vlayout.addWidget(self.detected_font_label)
         vlayout.addWidget(self.e_source)
         vlayout.addWidget(self.e_trans)
         vlayout.addWidget(SeparatorWidget(self))
@@ -426,6 +443,14 @@ class TransPairWidget(Widget):
         hlayout.setSpacing(spacing)
 
         self.setAcceptDrops(True)
+    
+    def updateDetectedFontName(self):
+        """更新顯示的識別字體名稱"""
+        if self.textblock is not None:
+            font_name = getattr(self.textblock, '_detected_font_name', '')
+            self.detected_font_label.setText(font_name if font_name else '')
+        else:
+            self.detected_font_label.setText('')
 
     def on_idx_edited(self, new_idx: int):
         new_idx -= 1

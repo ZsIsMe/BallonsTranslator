@@ -2,6 +2,7 @@ import os
 import hashlib
 import logging
 import sys
+import pickle
 import torch
 
 from typing import Tuple
@@ -27,12 +28,28 @@ from utils import download_util
 MODEL_REL_PATH = os.path.join('data', 'models', 'YuzuMarker.FontDetection', 'name=4x-epoch=18-step=368676.ckpt')
 MODEL_URL = 'https://huggingface.co/gyrojeff/YuzuMarker.FontDetection/resolve/main/name=4x-epoch=18-step=368676.ckpt'
 MODEL_SHA256 = '4544568829be10a98653a2c965f82fb229d5e02146578ccb3402518d9c022b1a'
-CACHE_REL_PATH = os.path.join('data','font_demo_cache.bin')
+CACHE_REL_PATH = os.path.join('data', 'font_demo_cache.bin')
 
-# Add the YuzuMarker.FontDetection directory to the Python path so we can import font_dataset
-YUZUMARKER_DIR = os.path.join(shared.PROGRAM_PATH, 'data', 'models', 'YuzuMarker.FontDetection')
-if YUZUMARKER_DIR not in sys.path:
-    sys.path.insert(0, YUZUMARKER_DIR)
+
+# Stub class for unpickling font_demo_cache.bin without depending on YuzuMarker.FontDetection
+class _DSFontStub:
+    """Stub class to unpickle DSFont objects from font_demo_cache.bin"""
+    def __init__(self, path='', language=''):
+        self.path = path
+        self.language = language
+
+
+def _register_dsfont_stub():
+    """Register stub class for unpickling font_demo_cache.bin"""
+    # Create fake modules to allow pickle to find DSFont class
+    if 'font_dataset' not in sys.modules:
+        import types
+        font_dataset_module = types.ModuleType('font_dataset')
+        font_dataset_font_module = types.ModuleType('font_dataset.font')
+        font_dataset_font_module.DSFont = _DSFontStub
+        font_dataset_module.font = font_dataset_font_module
+        sys.modules['font_dataset'] = font_dataset_module
+        sys.modules['font_dataset.font'] = font_dataset_font_module
 
 
 def _sha256_of_file(path: str) -> str:
@@ -86,14 +103,18 @@ def _clean_state_dict_keys(state_dict: Dict[str, torch.Tensor]) -> Dict[str, tor
     return new_sd
 
 def prepare_fonts(cache_path: str = None):
-    """Load font list from cache file"""
+    """Load font list from cache file.
+    
+    Returns a list of font paths like:
+    ['Adobe/CJK/SourceHanSans-Bold.otf', 
+     'Morisawa（森泽）/日文/MorisawaAOTF/日文/ゴシック体（黑体）/A-OTF-FutoGoB101Pro-Bold.otf', ...]
+    """
     try:
         if cache_path and os.path.exists(cache_path):
-            if YUZUMARKER_DIR not in sys.path:
-                sys.path.insert(0, YUZUMARKER_DIR)
+            # Register stub class to unpickle without YuzuMarker.FontDetection dependency
+            _register_dsfont_stub()
             
             with open(cache_path, 'rb') as f:
-                import pickle
                 font_objects = pickle.load(f)
                 
                 # Convert font objects to their path strings
@@ -101,13 +122,16 @@ def prepare_fonts(cache_path: str = None):
                 for font_obj in font_objects:
                     if hasattr(font_obj, 'path'):
                         font_list.append(font_obj.path)
-                    else:
-                        # Fallback: if the object doesn't have path attribute, keep the original object
+                    elif isinstance(font_obj, str):
                         font_list.append(font_obj)
+                    else:
+                        # Fallback: convert to string
+                        font_list.append(str(font_obj))
                 
+                logger.info(f"Loaded {len(font_list)} fonts from cache")
                 return font_list
         else:
-            pass
+            logger.warning(f"Font cache file not found at {cache_path}")
     except FileNotFoundError as e:
         logger.warning(f"Font cache file not found at {cache_path}: {e}")
     except PermissionError as e:
@@ -240,9 +264,17 @@ class FontDetector:
             logger.exception("Exception details:")
             raise
 
-    def detect(self, img_bgr) -> Tuple[str, float]:
+    def detect(self, img_bgr, return_full_path: bool = True) -> Tuple[str, float]:
         """Detect font from a BGR numpy image (cv2 style). Returns (font_name, confidence).
-        If confidence < 0.6 returns ("UNKNOWN", 0.0) per requirement.
+        
+        Args:
+            img_bgr: BGR numpy image (cv2 style)
+            return_full_path: If True, return full path like 
+                'Morisawa（森泽）/日文/MorisawaAOTF/日文/ゴシック体（黑体）/A-OTF-FutoGoB101Pro-Bold.otf'
+                If False, return only filename without extension like 'A-OTF-FutoGoB101Pro-Bold'
+        
+        Returns:
+            Tuple of (font_name, confidence). If confidence < 0.6, returns ("UNKNOWN", 0.0).
         """
         if self.model is None:
             self.load()
@@ -263,11 +295,17 @@ class FontDetector:
                 probs = out[0][:font_count].softmax(dim=0)
                 top_idx = int(probs.argmax().cpu().item())
                 conf = float(probs[top_idx].cpu().item())
+            
             # map index to font_list
             font_name = None
             if self.font_list is not None and top_idx < len(self.font_list):
                 font_path = self.font_list[top_idx]
-                font_name = os.path.splitext(os.path.basename(font_path))[0]
+                if return_full_path:
+                    # Return full path like 'Morisawa（森泽）/日文/.../A-OTF-FutoGoB101Pro-Bold.otf'
+                    font_name = font_path
+                else:
+                    # Return only filename without extension
+                    font_name = os.path.splitext(os.path.basename(font_path))[0]
             else:
                 font_name = f'font_{top_idx}'
 

@@ -205,7 +205,8 @@ class Model48pxOCR:
                 # self.logger.info(f'prob: {prob} {txt} fg: ({fr}, {fg}, {fb}) bg: ({br}, {bg}, {bb})')
                 
                 cur_region = textblk_lst[textblk_lst_indices[i+chunck_idx]]
-                cur_region.text.append(txt)
+                #cur_region.text.append(txt) 看看能不能自动换行
+                cur_region.text.append(txt + '\n')
                 cur_region.update_font_colors(np.array([fr, fg, fb]), np.array([br, bg, bb]))
 
             chunck_idx += N

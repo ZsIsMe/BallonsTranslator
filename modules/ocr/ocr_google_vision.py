@@ -95,7 +95,7 @@ class OCRGoogleVisionAPI(OCRBase):
                     },
                     "features": [
                         {
-                            "type": "TEXT_DETECTION"
+                            "type": "DOCUMENT_TEXT_DETECTION"
                         }
                     ]
                 }
@@ -112,14 +112,15 @@ class OCRGoogleVisionAPI(OCRBase):
         }
 
         client_kwargs = {'headers': headers} 
-        if self.proxy_url: 
+        # 只有當 proxy_url 是有效的非空字符串時才使用代理
+        proxy_url = self.proxy_url.strip() if self.proxy_url else ''
+        if proxy_url: 
             mounts = {}
-            if self.proxy_url.startswith(('http://', 'https://', 'socks4://', 'socks5://')): 
-                mounts["all://"] = httpx.HTTPTransport(proxy=self.proxy_url) 
+            if proxy_url.startswith(('http://', 'https://', 'socks4://', 'socks5://')): 
+                mounts["all://"] = httpx.HTTPTransport(proxy=proxy_url) 
+                client_kwargs['mounts'] = mounts
             else:
-                self.logger.warning("The proxy URL does not contain a schema (http://, https://, socks4://, socks5://). The proxy may not work.")
-                mounts["all://"] = httpx.HTTPTransport(proxy=self.proxy_url) 
-            client_kwargs['mounts'] = mounts 
+                self.logger.warning("The proxy URL does not contain a schema (http://, https://, socks4://, socks5://). Proxy will be ignored.") 
 
         with httpx.Client(**client_kwargs) as client: 
             try:
@@ -151,6 +152,82 @@ class OCRGoogleVisionAPI(OCRBase):
             return response_json['responses'][0]['fullTextAnnotation']['text']
         except (IndexError, KeyError, TypeError):
             return "Full text not found or not recognized"
+
+    def calculate_font_size(self, response_json, is_vertical: bool = False) -> float:
+        """
+        從 DOCUMENT_TEXT_DETECTION 結果計算字體大小
+        
+        通過提取每個字符的邊界框，計算字符高度（或垂直文本的寬度）的中位數
+        
+        Args:
+            response_json: Google Vision API 返回的 JSON
+            is_vertical: 是否為垂直文本
+            
+        Returns:
+            float: 估算的字體大小（像素），失敗返回 -1
+        """
+        try:
+            full_text_annotation = response_json['responses'][0].get('fullTextAnnotation')
+            if not full_text_annotation:
+                if self.debug_mode:
+                    self.logger.debug('No fullTextAnnotation in response, cannot calculate font size')
+                return -1
+            pages = full_text_annotation.get('pages', [])
+            if not pages:
+                if self.debug_mode:
+                    self.logger.debug('No pages in fullTextAnnotation')
+                return -1
+        except (KeyError, IndexError, TypeError) as e:
+            if self.debug_mode:
+                self.logger.debug(f'Error accessing response structure: {e}')
+            return -1
+        
+        char_sizes = []
+        char_count = 0
+        # 需要過濾的標點符號（這些字符通常較小，會影響估算）
+        punctuation = set('。、！？…「」『』（）【】〈〉《》,.!?\'"()[]{}<>·-—')
+        
+        for page in pages:
+            for block in page.get('blocks', []):
+                for paragraph in block.get('paragraphs', []):
+                    for word in paragraph.get('words', []):
+                        for symbol in word.get('symbols', []):
+                            char_count += 1
+                            text = symbol.get('text', '')
+                            
+                            # 跳過標點符號
+                            if text in punctuation or not text.strip():
+                                continue
+                            
+                            bbox = symbol.get('boundingBox', {})
+                            vertices = bbox.get('vertices', [])
+                            
+                            if len(vertices) < 4:
+                                continue
+                            
+                            # 計算字符尺寸
+                            xs = [v.get('x', 0) for v in vertices]
+                            ys = [v.get('y', 0) for v in vertices]
+                            
+                            width = max(xs) - min(xs)
+                            height = max(ys) - min(ys)
+                            
+                            # 根據文字方向選擇尺寸
+                            # 垂直文本：用寬度；水平文本：用高度
+                            char_size = width if is_vertical else height
+                            
+                            # 過濾不合理的尺寸（太小可能是噪點，太大可能是錯誤）
+                            if 8 < char_size < 500:
+                                char_sizes.append(char_size)
+        
+        if self.debug_mode:
+            self.logger.debug(f'Font size calculation: {char_count} total chars, {len(char_sizes)} valid chars')
+        
+        if not char_sizes:
+            return -1
+        
+        # 使用中位數更穩定，避免極端值影響
+        return float(np.median(char_sizes))
 
     def process_image(self, image_buffer: bytes):
         response = self.send_to_google_vision(image_buffer)
@@ -185,11 +262,75 @@ class OCRGoogleVisionAPI(OCRBase):
                 cropped_img = img[y1:y2, x1:x2]
                 if self.debug_mode:
                     self.logger.debug(f'Cropped image dimensions: {cropped_img.shape}')
-                blk.text = self.ocr(cropped_img)
+                
+                # 調用 OCR 並同時計算字體大小
+                # 注意：blk.vertical 可能是 None，需要轉換為 bool
+                is_vertical = bool(blk.vertical) if blk.vertical is not None else False
+                text, font_size = self.ocr_with_font_size(cropped_img, is_vertical=is_vertical)
+                blk.text = text
+                
+                # 如果成功計算出字體大小，設置到 TextBlock
+                if font_size > 0:
+                    blk._detected_font_size = font_size
+                    blk.font_size = font_size
+                    if self.debug_mode:
+                        self.logger.debug(f'Detected font size: {font_size:.1f}px')
             else:
                 if self.debug_mode:
                     self.logger.warning('Invalid text block coordinates')
                 blk.text = ''
+
+    def ocr_with_font_size(self, img: np.ndarray, is_vertical: bool = False) -> tuple:
+        """
+        執行 OCR 並同時計算字體大小
+        
+        Args:
+            img: 輸入圖片
+            is_vertical: 是否為垂直文本
+            
+        Returns:
+            tuple: (識別的文本, 字體大小)，字體大小失敗時為 -1
+        """
+        if self.debug_mode:
+            self.logger.debug(f'Starting OCR with font size detection on image of shape: {img.shape}')
+        
+        self._respect_delay()
+        
+        try:
+            if img.size == 0:
+                if self.debug_mode:
+                    self.logger.warning('Empty image for OCR')
+                return '', -1
+            
+            _, buffer = cv2.imencode('.jpg', img)
+            response = self.send_to_google_vision(buffer.tobytes())
+            
+            # 提取文本
+            full_text = self.extract_full_text(response)
+            
+            ignore_texts = ['Full text not found or not recognized']
+            if full_text in ignore_texts:
+                return '', -1
+            
+            # 處理文本
+            if self.newline_handling == 'remove':
+                full_text = full_text.replace('\n', ' ')
+            full_text = self._apply_punctuation_and_spacing(full_text)
+            if self.no_uppercase:
+                full_text = self._apply_no_uppercase(full_text)
+            
+            # 計算字體大小
+            font_size = self.calculate_font_size(response, is_vertical=is_vertical)
+            
+            if self.debug_mode:
+                self.logger.debug(f'OCR result: {full_text[:100]}..., font_size: {font_size}')
+            
+            return full_text, font_size
+            
+        except Exception as e:
+            if self.debug_mode:
+                self.logger.error(f"OCR error: {str(e)}")
+            return '', -1
 
     def ocr_img(self, img: np.ndarray) -> str:
         return self.ocr(img)

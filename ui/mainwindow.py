@@ -42,6 +42,10 @@ from .custom_widget import MessageBox, FrameLessMessageBox, ImgtransProgressMess
 class PageListView(QListWidget):
 
     reveal_file = Signal()
+    mark_to_edit = Signal()
+    open_with_ps = Signal()
+    open_with_ps_now = Signal()
+    clear_ps_marks = Signal()
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -50,10 +54,22 @@ class PageListView(QListWidget):
     def contextMenuEvent(self, e: QContextMenuEvent):
         menu = QMenu()
         reveal_act = menu.addAction(self.tr('Reveal in File Explorer'))
+        mark_act = menu.addAction('Mark to edit')
+        open_ps_now_act = menu.addAction('Open with PS (now)')
+        open_ps_act = menu.addAction('Open with PS (all marked)')
+        clear_act = menu.addAction('Clear PS marks')
         rst = menu.exec_(e.globalPos())
 
         if rst == reveal_act:
             self.reveal_file.emit()
+        elif rst == mark_act:
+            self.mark_to_edit.emit()
+        elif rst == open_ps_now_act:
+            self.open_with_ps_now.emit()
+        elif rst == open_ps_act:
+            self.open_with_ps.emit()
+        elif rst == clear_act:
+            self.clear_ps_marks.emit()
 
         return super().contextMenuEvent(e)
 
@@ -85,6 +101,8 @@ class MainWindow(mainwindow_cls):
         self.backup_blkstyles = []
         self._run_imgtrans_wo_textstyle_update = False
         self._export_json_after_run = False
+        self.ps_marked_paths = []
+        self.ps_marked_set = set()
 
         self.setupThread()
         self.setupUi()
@@ -160,6 +178,10 @@ class MainWindow(mainwindow_cls):
 
         self.pageList = PageListView()
         self.pageList.reveal_file.connect(self.on_reveal_file)
+        self.pageList.mark_to_edit.connect(self.on_mark_to_edit)
+        self.pageList.open_with_ps_now.connect(self.on_open_with_ps_now)
+        self.pageList.open_with_ps.connect(self.on_open_with_ps)
+        self.pageList.clear_ps_marks.connect(self.on_clear_ps_marks)
         self.pageList.setHidden(True)
         self.pageList.currentItemChanged.connect(self.pageListCurrentItemChanged)
 
@@ -1669,6 +1691,48 @@ class MainWindow(mainwindow_cls):
         elif sys.platform == 'darwin':
             p = "\""+current_img_path+"\""
             subprocess.Popen("open -R "+p, shell=True)
+
+    def _get_inpainted_path(self, current_img_path):
+        if not current_img_path or not osp.exists(current_img_path):
+            return None
+        img_path = Path(current_img_path)
+        inpainted_path = img_path.parent / 'inpainted' / (img_path.stem + '.png')
+        if not inpainted_path.exists():
+            return None
+        return inpainted_path
+
+    def on_mark_to_edit(self):
+        inpainted_path = self._get_inpainted_path(self.imgtrans_proj.current_img_path())
+        if not inpainted_path:
+            return
+        inpainted_str = str(inpainted_path)
+        if inpainted_str in self.ps_marked_set:
+            return
+        self.ps_marked_set.add(inpainted_str)
+        self.ps_marked_paths.append(inpainted_str)
+
+    def on_open_with_ps_now(self):
+        if sys.platform != 'darwin':
+            return
+        inpainted_path = self._get_inpainted_path(self.imgtrans_proj.current_img_path())
+        if not inpainted_path:
+            return
+        p = "\""+str(inpainted_path)+"\""
+        subprocess.Popen("open -a \"Adobe Photoshop 2026\" "+p, shell=True)
+
+    def on_open_with_ps(self):
+        if sys.platform == 'darwin':
+            if len(self.ps_marked_paths) == 0:
+                return
+            for path in self.ps_marked_paths:
+                if not osp.exists(path):
+                    continue
+                p = "\""+path+"\""
+                subprocess.Popen("open -a \"Adobe Photoshop 2026\" "+p, shell=True)
+
+    def on_clear_ps_marks(self):
+        self.ps_marked_paths.clear()
+        self.ps_marked_set.clear()
 
     def on_set_gsearch_widget(self):
         setup = self.leftBar.globalSearchChecker.isChecked()
