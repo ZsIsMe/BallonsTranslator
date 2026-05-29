@@ -315,6 +315,12 @@ class TextBlock:
     
     def min_rect(self, rotate_back=True, ids=None) -> List[int]:
         angled, center, polygons = self.unrotated_polygons(ids=ids)
+        if polygons.size == 0:
+            x1, y1, x2, y2 = self.xyxy
+            min_bbox = np.array([[x1, y1, x2, y1, x2, y2, x1, y2]], dtype=np.float64)
+            if angled and rotate_back:
+                min_bbox = rotate_polygons(center, min_bbox, -self.angle)
+            return min_bbox.reshape(-1, 4, 2).astype(np.int64)
         min_x = polygons[:, ::2].min()
         min_y = polygons[:, 1::2].min()
         max_x = polygons[:, ::2].max()
