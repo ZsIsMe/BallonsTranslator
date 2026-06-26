@@ -11,8 +11,9 @@ data/testpacks
 config/textstyles
 release
 libs
-icons
 .btrans_cache
+.codex
+.agents
 
 tmp.py
 dummy_scripts.py
@@ -41,6 +42,7 @@ localtmp*
 *.onnx
 *.7z
 venv
+.venv
 pip
 .DS_Store
 *.dic

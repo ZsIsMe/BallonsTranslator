@@ -2,13 +2,11 @@
 > **If you're sharing the translated result publicly and no experienced human translator participated in a throughout translating or proofreading, please mark it as machine translation somewhere clear to see.**
 
 # BallonTranslator
-[简体中文](/README.md) | English | [pt-BR](doc/README_PT-BR.md) | [Русский](doc/README_RU.md) | [日本語](doc/README_JA.md) | [Indonesia](doc/README_ID.md) | [Tiếng Việt](doc/README_VI.md) | [한국어](doc/README_KO.md) | [Español](doc/README_ES.md) | [Français](doc/README_FR.md)
+[简体中文](/README.md) | English | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md)
 
 Yet another computer-aided comic/manga translation tool powered by deep learning.  
 
-The AI Modified [Ballonstranslator-Pro](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro) Version has added many new features. The main contributors of this project did not participate in its development; use at your own risk.
-
-<img src="doc/src/ui0.jpg" div align=center>
+<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
 
 <p align=center>
 preview
@@ -33,52 +31,60 @@ preview
 # Installation
 
 ## On Windows
-If you don't want to install Python and Git by yourself and have access to the Internet:  
-Download BallonsTranslator_dev_src_with_gitpython.7z from [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) or [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing), unzip it and run launch_win.bat.   
-Run scripts/local_gitpull.bat to get the latest update.
-Note these provided packages cannot run on Windows 7, Win 7 users need to install [Python 3.8](https://www.python.org/downloads/release/python-3810/) and run the source code.
 
-## Run the source code
-
-Install [Python](https://www.python.org/downloads/release/python-31011) **<= 3.12** (dont use the one installed from microsoft store) and [Git](https://git-scm.com/downloads).
-
-```bash
-# Clone this repo
-$ git clone https://github.com/dmMaze/BallonsTranslator.git ; cd BallonsTranslator
-
-# Launch app
-$ python3 launch.py
-
-# Update app
-$ python3 launch.py --update
+**Method A (One-Click Local Environment Setup, requires PowerShell)**:
+The script installs `BallonsTranslator` in the directory where you run it:
+```powershell
+irm https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts/install.ps1 | iex
+```
+Or run the following command in the Command Prompt (`cmd.exe`):
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts/install.ps1 | iex"
 ```
 
-Note the first time you launch it will install the required libraries and download models automatically. If the downloads fail, you will need to download the **data** folder (or missing files mentioned in the terminal) from [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) or [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) and save it to the corresponding path in source code folder.
 
-## Build macOS application (compatible with both intel and apple silicon chips)
-[Reference](doc/macOS_app.md)  
-Some issues may occur, running the source code directly is the recommended way for now.
+**Method B (Download Pre-configured Package)**:
+Download `Ballonstranslator_win_minium.zip` from [GitHub Releases](https://github.com/dmMaze/BallonsTranslator/releases), extract it, and double-click `launch_win.bat` to launch the application.
+
+These methods do not support Windows 7; Windows 7 users must install [Python 3.8](https://www.python.org/downloads/release/python-3810/) manually and run from source.
+
+If you see errors involving `msvcp140.dll`, `c10.dll`, or `[WinError 1114]`, install or update the [Microsoft Visual C++ Redistributable x64](https://aka.ms/vc14/vc_redist.x64.exe) (Visual Studio 2015-2022; [official download notes](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)).
+
+## macOS / Linux
+
+The script installs `BallonsTranslator` in the directory where you run it:
+```bash
+curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts/install.sh && chmod +x install.sh && ./install.sh
+```
+
+If `curl` is not available, download the script with `wget -O ...` instead. The app launches automatically after installation; later, use `cd BallonsTranslator && ./launch.sh` to start it again.
+
+The app checks core dependencies at startup. When you select a module that needs extra libraries, the app will prompt you to install the missing optional dependencies (you can also enable automatic installation in Settings). If model downloads fail, check your network/proxy, or download the required models from [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) or [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) and place them manually in the `data` directory.
+
+The software has built-in update checking; see Config panel -> Startup & Update for details.
+
 
 # Usage
 
 **It is recommended to run the program in a terminal in case it crashed and left no information, see the following gif.**
-<img src="doc/src/run.gif">  
+<img src="https://github.com/user-attachments/assets/ee92fbdc-718c-4e04-a876-0eff3ee2a989">
 - The first time you run the application, please select the translator and set the source and target languages by clicking the settings icon.
 - Open a folder containing images of a comic (manga/manhua/manhwa) that need translation by clicking the folder icon.
 - Click the `Run` button and wait for the process to complete.
 
 The font formats such as font size and color are determined by the program automatically in this process, you can predetermine those formats by change corresponding options from "decide by program" to "use global setting" in the config panel->Typesetting. (global settings are those formats shown by the right font format panel when you are not editing any textblock in the scene)
+<img src="https://github.com/user-attachments/assets/fb8a8b2c-54e4-4579-8319-42a172296c80">
 
 ## Image Editing
 
 ### Inpaint Tool
-<img src="doc/src/imgedit_inpaint.gif">
+<img src="https://github.com/user-attachments/assets/de0bc35d-6651-4f2f-985c-cfe9bfafb124">
 <p align = "center">
 Image Editing Mode, Inpainting Tool
 </p>
 
 ### rect tool
-<img src="doc/src/rect_tool.gif">
+<img src="https://github.com/user-attachments/assets/6c47f46f-ffd3-41fd-b667-5442be304c79">
 <p align = "center">
 Rect Tool
 </p>
@@ -87,17 +93,17 @@ To 'erase' unwanted inpainted results, use the inpainting tool or rect tool with
 The result depends on how accurately the algorithm ("method 1" and "method 2" in the gif) extracts the text mask. It could perform worse on complex text & background.  
 
 ## Text editing
-<img src="doc/src/textedit.gif">
+<img src="https://github.com/user-attachments/assets/0f688abe-41f7-416a-85c8-e0dd6968fd00">
 <p align = "center">
 Text Editing Mode
 </p>
 
-<img src="doc/src/multisel_autolayout.gif" div align=center>
+<img src="https://github.com/user-attachments/assets/6d31c8a5-b909-4339-8036-7fc3ba2f014c" div align=center>
 <p align=center>
 Batch Text Formatting & Auto Layout
 </p>
 
-<img src="doc/src/ocrselected.gif" div align=center>
+<img src="https://github.com/user-attachments/assets/1b76c164-1454-4aa7-b60c-9fbdb0968350" div align=center>
 <p align=center>
 OCR & Translate Selected Area
 </p>
@@ -118,11 +124,11 @@ OCR & Translate Selected Area
 * Set text shadow and transparency in the text style panel -> Effect.  
 * ```Alt+Arrow Keys``` or ```Alt+WASD``` (```pageDown``` or ```pageUp``` while in text editing mode) to switch between text blocks.
   
-<img src="doc/src/configpanel.png">
+<img src="https://github.com/user-attachments/assets/084a250d-6a31-4344-94c0-2a5f4ba64b96">
 
 ## Headless mode (Run without GUI)
 ``` python
-python launch.py --headless --exec_dirs "[DIR_1],[DIR_2]..."
+python -m ballontranslator --headless --exec_dirs "[DIR_1],[DIR_2]..."
 ```
 Note the configuration (source language, target language, inpaint model, etc) will load from config/config.json.  
 If the rendered font size is not right, specify logical DPI manually via ```--ldpi ```, typical values are 96 and 72.
@@ -169,7 +175,6 @@ This project is heavily dependent upon [manga-image-translator](https://github.c
 
 ## FAQ & Misc
 * If your computer has an Nvidia GPU or Apple silicon, the program will enable hardware acceleration. 
-* Add support for [saladict](https://saladict.crimx.com) (*All-in-one professional pop-up dictionary and page translator*) in the mini menu on text selection. [Installation guide](doc/saladict.md)
 * Accelarate performance if you have a [NVIDIA's CUDA](https://pytorch.org/docs/stable/notes/cuda.html) or [AMD's ROCm](https://pytorch.org/docs/stable/notes/hip.html) device as most modules uses [PyTorch](https://pytorch.org/get-started/locally/).
 * Fonts are from your system's fonts.
 * Thanks to [bropines](https://github.com/bropines) for the Russian localization.

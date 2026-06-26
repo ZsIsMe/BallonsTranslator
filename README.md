@@ -1,14 +1,16 @@
+
 > [!IMPORTANT]  
 > **如打算公开分享本工具的机翻结果，且没有有经验的译者进行过完整的翻译或校对，请在显眼位置注明机翻。**
 
 # BallonTranslator
-简体中文 | [English](/README_EN.md) | [pt-BR](doc/README_PT-BR.md) | [Русский](doc/README_RU.md) | [日本語](doc/README_JA.md) | [Indonesia](doc/README_ID.md) | [Tiếng Việt](doc/README_VI.md) | [한국어](doc/README_KO.md) | [Español](doc/README_ES.md) | [Français](doc/README_FR.md)
+简体中文 | [English](/README_EN.md) | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md)
 
 深度学习辅助漫画翻译工具，支持一键机翻和简单的图像/文本编辑  
 
-AI 魔改版 [Ballonstranslator-Pro](https://github.com/thomaswantstobeaskeleton/BallonsTranslator-Pro) 新增了许多特性，本项目主要贡献者未参与开发，使用需风险自负。
+交流反馈 QQ 群：719881337  
 
-<img src="doc/src/ui0.jpg" div align=center>
+
+<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
 
 <p align=center>
 界面预览
@@ -34,49 +36,55 @@ AI 魔改版 [Ballonstranslator-Pro](https://github.com/thomaswantstobeaskeleton
 # 使用说明
 
 ## Windows
-如果用 Windows 而且不想自己手动配置环境，而且能正常访问互联网:  
-从 [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) 或 [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) 下载 BallonsTranslator_dev_src_with_gitpython.7z，解压并运行 launch_win.bat 启动程序。如果无法自动下载库和模型，手动下载 data 和 ballontrans_pylibs_win.7z 并解压到程序目录下。  
-运行 scripts/local_gitpull.bat 获取更新。 
-注意这些打包版无法在 Windows 7 上运行，win 7 用户需要自行安装 [Python 3.8](https://www.python.org/downloads/release/python-3810/) 运行源码。
 
-## 运行源码
-
-安装 [Python](https://www.python.org/downloads/release/python-31011) **<= 3.12** (别用微软应用商店版) 和 [Git](https://git-scm.com/downloads)
-
-```bash
-# 克隆仓库
-$ git clone https://github.com/dmMaze/BallonsTranslator.git ; cd BallonsTranslator
-
-# 启动程序
-$ python3 launch.py
-
-# 更新程序
-python3 launch.py --update
+**方式 A（一键自动配置本地环境，需要系统支持 PowerShell）**：
+该脚本会在执行目录安装 `BallonsTranslator`：
+```powershell
+irm https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts/install.ps1 | iex
+```
+或者在系统的命令提示符 (`cmd.exe`) 中运行：
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts/install.ps1 | iex"
 ```
 
-第一次运行会自动安装 torch 等依赖项并下载所需模型和文件，如果模型下载失败，需要手动从 [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) 或 [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) 下载 data 文件夹(或者报错里提到缺失的文件)，并保存到源码目录下的对应位置。
+**方式 B（下载免配置压缩包）**：
+从 [GitHub Releases](https://github.com/dmMaze/BallonsTranslator/releases) 下载 `Ballonstranslator_win_minium.zip`，解压并双击运行 `launch_win.bat` 启动程序。  
+  
+以上方式不支持 Windows 7，Windows 7 用户需要自行安装 [Python 3.8](https://www.python.org/downloads/release/python-3810/) 运行源码。 
 
-## 构建 macOS 应用(适用 apple silicon 芯片)
-[参考](doc/macOS_app_CN.md)  
-可能会有各种问题，目前还是推荐跑源码
+
+如果遇到 `msvcp140.dll`、`c10.dll` 或 `[WinError 1114]` 相关错误，请安装或更新 [Microsoft Visual C++ Redistributable x64](https://aka.ms/vc14/vc_redist.x64.exe)（Visual Studio 2015-2022；[官方下载说明](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)）。  
+
+## macOS / Linux
+
+该脚本会在执行目录安装 `BallonsTranslator`：
+```bash
+curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts/install.sh && chmod +x install.sh && ./install.sh
+```
+
+如果系统没有 `curl`，也可以用 `wget -O ...` 下载脚本。安装完成后会自动启动程序；之后可运行 `cd BallonsTranslator && ./launch.sh` 再次启动。  
+
+启动程序会检查核心依赖；选择需要额外库的模块时，程序会提示安装缺失的可选依赖（也可在设置中启用自动安装）。如果模型下载失败，请检查网络代理，或者从 [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) 或 [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) 下载所需模型后手动放置到 `data` 目录下。
+
+软件已内置更新检查，详见设置->启动与更新。  
 
 ## 一键翻译
 **建议在命令行终端下运行程序**，首次运行请先配置好源语言/目标语言，打开一个带图片的文件夹，点击 Run 等待翻译完成  
-<img src="doc/src/run.gif">  
+<img src="https://github.com/user-attachments/assets/ee92fbdc-718c-4e04-a876-0eff3ee2a989">  
 
 一键机翻嵌字格式如大小、颜色等默认是由程序决定的，可以在设置面板->嵌字菜单中改用全局设置。全局字体格式就是未编辑任何文本块时右侧字体面板显示的格式:  
-<img src="doc/src/global_font_format.png"> 
+<img src="https://github.com/user-attachments/assets/fb8a8b2c-54e4-4579-8319-42a172296c80"> 
 
 ## 画板
 
 ## 修复画笔
-<img src="doc/src/imgedit_inpaint.gif">
+<img src="https://github.com/user-attachments/assets/de0bc35d-6651-4f2f-985c-cfe9bfafb124">
 <p align = "center">
 修复画笔
 </p>
 
 ### 矩形工具
-<img src="doc/src/rect_tool.gif">
+<img src="https://github.com/user-attachments/assets/6c47f46f-ffd3-41fd-b667-5442be304c79">
 <p align = "center">
 矩形工具
 </p>
@@ -86,19 +94,19 @@ python3 launch.py --update
 勾选"自动"拉完框立即修复，否则需要按下"修复"或者空格键才进行修复，或 ```Ctrl+D``` 删除矩形选框。 
 
 ## 文本编辑
-<img src="doc/src/textedit.gif">
+<img src="https://github.com/user-attachments/assets/0f688abe-41f7-416a-85c8-e0dd6968fd00">
 
 
 <p align = "center">
 文本编辑
 </p>
 
-<img src="doc/src/multisel_autolayout.gif" div align=center>
+<img src="https://github.com/user-attachments/assets/6d31c8a5-b909-4339-8036-7fc3ba2f014c" div align=center>
 <p align=center>
 批量文本格式调整及自动排版
 </p>
 
-<img src="doc/src/ocrselected.gif" div align=center>
+<img src="https://github.com/user-attachments/assets/1b76c164-1454-4aa7-b60c-9fbdb0968350" div align=center>
 <p align=center>
 OCR并翻译选中文本框
 </p>
@@ -118,11 +126,11 @@ OCR并翻译选中文本框
 * 字体样式面板-"特效"修改透明度添加阴影
 * ```Alt+Arrow Keys``` 或 ```Alt+WASD``` (正在编辑文本块时 ```pageDown``` 或 ```pageUp```) 在文本块间切换
 
-<img src="doc/src/configpanel.png">  
+<img src="https://github.com/user-attachments/assets/084a250d-6a31-4344-94c0-2a5f4ba64b96">  
 
 ## 命令行模式 (无GUI)
 ``` python
-python launch.py --headless --exec_dirs "[DIR_1],[DIR_2]..."
+python -m ballontranslator --headless --exec_dirs "[DIR_1],[DIR_2]..."
 ```
 所有设置 (如检测模型, 原语言目标语言等) 会从 config/config.json 导入。  
 如果渲染字体大小不对, 通过 ```--ldpi ``` 指定 Logical DPI 大小, 通常为 96 和 72。
@@ -180,7 +188,6 @@ Sugoi 翻译器作者: [mingshiba](https://www.patreon.com/mingshiba)
 * 电脑带 Nvidia 显卡或 Apple silicon 默认启用 GPU 加速
 * 感谢 [bropines](https://github.com/bropines) 提供俄语翻译
 * 第三方输入法可能会造成右侧编辑框显示 bug，见[#76](https://github.com/dmMaze/BallonsTranslator/issues/76)，暂时不打算修
-* 选中文本迷你菜单支持*聚合词典专业划词翻译*[沙拉查词](https://saladict.crimx.com): [安装说明](doc/saladict_chs.md)
 <details>
   <summary><i>启用 AMD ROCm 显卡加速方法</i></summary>
 
@@ -224,30 +231,3 @@ Sugoi 翻译器作者: [mingshiba](https://www.patreon.com/mingshiba)
 
 5. 启动程序并设置 OCR 和文本检测 为 Cuda **(图像修复请继续使用 CPU)**
 6. 运行 OCR 并等待 ZLUDA 编译 PTX 文件 **(首次编译大概需要 5-10 分钟，取决于 CPU 性能)**,**下次运行无需编译**
-
-### 原生方案 (ROCm in Windows)
-
-**警告:**
-需要 Python 3.12 和 HIP SDK 6.4 以及 AMD 2026.1.1 驱动，需要重新安装依赖库。
-
-2026年AMD终于在 2026.1.1 驱动下正式支持 ROCm 在 windows系统下工作了。不幸的是AMD官方发布的新的 Pytorch 三件套需要 Python 3.12 版本。
-所以如果想使用原生 AI 加速，需要卸载项目内建的 Python 3.10 并移除 3.10 版本的库。重新安装内嵌 Python 3.12 并重新安装相关依赖库。
-
-**优点:**
-无需额外安装，开箱即用。（并不是）且图像修复工具可以正常使用 CUDA 加速。
-
-**缺点:**
-对显卡限制大，对 Python 版本也有要求。
-
-**安装步骤:**
-
-1. 检查显卡是否在 AMD 显卡驱动 AI 套件支持范围内。
-2. 确保 HIP SDK 为 6.4.x, Python 相关依赖库已经更新为 3.12 版本。
-3. 使用 [launch_win_amd_nightly.bat](launch_win_amd_nightly.bat) 启动程序。
-4. 检查 OCR 和文本检测、图像修复设置是否为 CUDA。
-
-**注意事项**
-launch_win_amd_nightly.bat 为了保证最大兼容性，默认下载并使用的是 Rocm6.4 的 Pytorch 三件套，如果需要 ROCm7，需要手动更新对应版本的 Pytorch。
-并且需要额外安装 ROCm7 自身的三个SDK库。
- 
-</details>
