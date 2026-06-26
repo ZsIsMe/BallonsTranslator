@@ -1,5 +1,5 @@
 import os.path as osp
-import os, re, traceback, sys
+import os, re, traceback, sys, json, tempfile
 from typing import List, Union
 from pathlib import Path
 import subprocess
@@ -45,6 +45,7 @@ class PageListView(QListWidget):
     mark_to_edit = Signal()
     open_with_ps = Signal()
     open_with_ps_now = Signal()
+    open_ps_pair = Signal()
     clear_ps_marks = Signal()
 
     def __init__(self, *args, **kwargs) -> None:
@@ -56,6 +57,7 @@ class PageListView(QListWidget):
         reveal_act = menu.addAction(self.tr('Reveal in File Explorer'))
         mark_act = menu.addAction('Mark to edit')
         open_ps_now_act = menu.addAction('Open with PS (now)')
+        open_ps_pair_act = menu.addAction('Open pair')
         open_ps_act = menu.addAction('Open with PS (all marked)')
         clear_act = menu.addAction('Clear PS marks')
         rst = menu.exec_(e.globalPos())
@@ -66,6 +68,8 @@ class PageListView(QListWidget):
             self.mark_to_edit.emit()
         elif rst == open_ps_now_act:
             self.open_with_ps_now.emit()
+        elif rst == open_ps_pair_act:
+            self.open_ps_pair.emit()
         elif rst == open_ps_act:
             self.open_with_ps.emit()
         elif rst == clear_act:
@@ -198,6 +202,7 @@ class MainWindow(mainwindow_cls):
         self.pageList.reveal_file.connect(self.on_reveal_file)
         self.pageList.mark_to_edit.connect(self.on_mark_to_edit)
         self.pageList.open_with_ps_now.connect(self.on_open_with_ps_now)
+        self.pageList.open_ps_pair.connect(self.on_open_ps_pair)
         self.pageList.open_with_ps.connect(self.on_open_with_ps)
         self.pageList.clear_ps_marks.connect(self.on_clear_ps_marks)
         self.pageList.setHidden(True)
@@ -1900,8 +1905,7 @@ class MainWindow(mainwindow_cls):
     def _get_inpainted_path(self, current_img_path):
         if not current_img_path or not osp.exists(current_img_path):
             return None
-        img_path = Path(current_img_path)
-        inpainted_path = img_path.parent / 'inpainted' / (img_path.stem + '.png')
+        inpainted_path = Path(self.imgtrans_proj.get_inpainted_path(self.imgtrans_proj.current_img, get_last_modified=True))
         if not inpainted_path.exists():
             return None
         return inpainted_path
@@ -1924,6 +1928,80 @@ class MainWindow(mainwindow_cls):
             return
         p = "\""+str(inpainted_path)+"\""
         subprocess.Popen("open -a \"Adobe Photoshop 2026\" "+p, shell=True)
+
+    def on_open_ps_pair(self):
+        if sys.platform != 'darwin':
+            return
+        raw_path = self.imgtrans_proj.current_img_path()
+        if not raw_path or not osp.exists(raw_path):
+            return
+        inpainted_path = self._get_inpainted_path(raw_path)
+        if not inpainted_path:
+            return
+
+        try:
+            jsx = f"""(function () {{
+    app.bringToFront();
+
+    var rawFile = new File({json.dumps(str(raw_path), ensure_ascii=False)});
+    var inpaintedFile = new File({json.dumps(str(inpainted_path), ensure_ascii=False)});
+
+    if (!rawFile.exists) {{
+        alert("原圖檔案不存在：\\n" + decodeURI(rawFile.fsName));
+        return;
+    }}
+
+    if (!inpaintedFile.exists) {{
+        alert("去字圖檔案不存在：\\n" + decodeURI(inpaintedFile.fsName));
+        return;
+    }}
+
+    var inpaintedDoc = app.open(inpaintedFile);
+    try {{
+        inpaintedDoc.activeLayer.isBackgroundLayer = false;
+    }} catch (e) {{}}
+    try {{
+        inpaintedDoc.activeLayer.name = "去字圖";
+    }} catch (e) {{}}
+    var inpaintedLayer = inpaintedDoc.activeLayer;
+
+    var rawDoc = app.open(rawFile);
+    try {{
+        rawDoc.activeLayer.name = "原圖";
+    }} catch (e) {{}}
+
+    if (rawDoc.width.value !== inpaintedDoc.width.value || rawDoc.height.value !== inpaintedDoc.height.value) {{
+        rawDoc.resizeImage(inpaintedDoc.width, inpaintedDoc.height, inpaintedDoc.resolution, ResampleMethod.BICUBIC);
+    }}
+
+    var rawLayer = rawDoc.activeLayer.duplicate(inpaintedDoc, ElementPlacement.PLACEATEND);
+    rawDoc.close(SaveOptions.DONOTSAVECHANGES);
+
+    app.activeDocument = inpaintedDoc;
+    try {{
+        rawLayer.name = "原圖";
+        rawLayer.move(inpaintedLayer, ElementPlacement.PLACEAFTER);
+    }} catch (e) {{}}
+    inpaintedDoc.activeLayer = inpaintedLayer;
+}})();
+"""
+            with tempfile.NamedTemporaryFile('w', suffix='.jsx', prefix='ballontranslator_open_pair_', delete=False, encoding='utf-8') as jsx_file:
+                jsx_file.write(jsx)
+                jsx_path = jsx_file.name
+
+            applescript_jsx_path = jsx_path.replace('\\', '\\\\').replace('"', '\\"')
+            applescript = f"""tell application "Adobe Photoshop 2026"
+    activate
+    set jsCode to read POSIX file "{applescript_jsx_path}" as «class utf8»
+    do javascript jsCode
+end tell"""
+            subprocess.Popen([
+                'sh', '-c',
+                'osascript -e "$1"; status=$?; rm -f "$2"; exit $status',
+                'ballontranslator_open_pair', applescript, jsx_path
+            ])
+        except Exception as e:
+            create_error_dialog(e, self.tr('無法開啟 Photoshop 圖層組合'))
 
     def on_open_with_ps(self):
         if sys.platform == 'darwin':

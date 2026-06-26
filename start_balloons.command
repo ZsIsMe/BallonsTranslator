@@ -39,7 +39,7 @@ fi
 
 if [ "$STATUS" -eq 0 ]; then
   # 啟動程式
-  python launch.py
+  python -m ballontranslator
   STATUS=$?
 fi
 
