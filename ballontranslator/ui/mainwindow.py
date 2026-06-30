@@ -875,6 +875,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.exporttstyle_trigger.connect(self.export_tstyles)
         self.titleBar.darkmode_trigger.connect(self.on_darkmode_triggered)
         self.titleBar.merge_tool_trigger.connect(self.on_open_merge_tool)
+        self.titleBar.mask_round_corner_trigger.connect(self.on_open_mask_round_corner_tool)
 
         shortcutA = QShortcut(QKeySequence("A"), self)
         shortcutA.activated.connect(self.shortcutBefore)
@@ -1067,6 +1068,126 @@ class MainWindow(mainwindow_cls):
 
     def show_OCR_keyword_window(self):
         self.ocrSubWidget.show()
+
+    def on_open_mask_round_corner_tool(self):
+        """開啟 mask 圓角工具設定對話框"""
+        from qtpy.QtWidgets import QDialogButtonBox, QFormLayout, QRadioButton, QSpinBox, QButtonGroup
+
+        if self.imgtrans_proj.is_empty:
+            QMessageBox.warning(self, "警告", "請先開啟一個專案")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Mask 圓角工具")
+
+        layout = QVBoxLayout(dialog)
+        form_layout = QFormLayout()
+
+        radius_spin = QSpinBox(dialog)
+        radius_spin.setRange(0, 1000)
+        radius_spin.setValue(12)
+        radius_spin.setSuffix(" px")
+        form_layout.addRow("圓角半徑:", radius_spin)
+
+        current_radio = QRadioButton("目前頁", dialog)
+        all_radio = QRadioButton("全部頁", dialog)
+        current_radio.setChecked(True)
+        scope_group = QButtonGroup(dialog)
+        scope_group.addButton(current_radio, 0)
+        scope_group.addButton(all_radio, 1)
+
+        scope_layout = QHBoxLayout()
+        scope_layout.addWidget(current_radio)
+        scope_layout.addWidget(all_radio)
+        form_layout.addRow("套用範圍:", scope_layout)
+
+        layout.addLayout(form_layout)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        radius = radius_spin.value()
+        apply_all = scope_group.checkedId() == 1
+        self.apply_mask_round_corners(radius, apply_all=apply_all)
+
+    def apply_mask_round_corners(self, radius: int, apply_all=False):
+        """依照連通區削掉 mask 四角，不新增新的 mask 區域。"""
+        from ballontranslator.utils.imgproc_utils import round_mask_components
+
+        if radius <= 0:
+            QMessageBox.warning(self, "提示", "圓角半徑必須大於 0")
+            return
+
+        current_img = self.imgtrans_proj.current_img
+        if apply_all:
+            success_count, skipped_count, fail_count = self.apply_mask_round_corners_to_all(radius, round_mask_components)
+            if current_img and current_img in self.imgtrans_proj.pages:
+                self.imgtrans_proj.set_current_img(current_img)
+                self.canvas.updateLayers()
+            QMessageBox.information(
+                self,
+                "完成",
+                f"Mask 圓角處理完成\n成功: {success_count}\n跳過: {skipped_count}\n失敗: {fail_count}"
+            )
+            return
+
+        if not current_img:
+            QMessageBox.warning(self, "警告", "沒有目前頁")
+            return
+
+        mask = self.imgtrans_proj.mask_array
+        if mask is None or cv2.countNonZero(mask) == 0:
+            QMessageBox.warning(self, "提示", "目前頁沒有可處理的 mask")
+            return
+
+        rounded = round_mask_components(mask, radius)
+        self.imgtrans_proj.mask_array = rounded
+        self.imgtrans_proj.save_mask(current_img, rounded)
+        self.canvas.updateLayers()
+        QMessageBox.information(self, "完成", "目前頁 mask 圓角處理完成")
+
+    def apply_mask_round_corners_to_all(self, radius: int, round_mask_components):
+        from qtpy.QtWidgets import QProgressDialog
+
+        success_count = 0
+        skipped_count = 0
+        fail_count = 0
+        pages = list(self.imgtrans_proj.pages.keys())
+        total = len(pages)
+
+        progress = QProgressDialog("正在處理 mask 圓角...", "取消", 0, total, self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+
+        for idx, imgname in enumerate(pages):
+            progress.setValue(idx)
+            progress.setLabelText(f"正在處理: {imgname}")
+            QApplication.processEvents()
+            if progress.wasCanceled():
+                skipped_count += total - idx
+                break
+
+            try:
+                mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
+                if mask is None or cv2.countNonZero(mask) == 0:
+                    skipped_count += 1
+                    continue
+                rounded = round_mask_components(mask, radius)
+                self.imgtrans_proj.save_mask(imgname, rounded)
+                if imgname == self.imgtrans_proj.current_img:
+                    self.imgtrans_proj.mask_array = rounded
+                success_count += 1
+            except Exception as e:
+                LOGGER.error(f"Failed to round mask corners for {imgname}: {e}")
+                fail_count += 1
+
+        progress.setValue(total)
+        return success_count, skipped_count, fail_count
 
     def on_open_merge_tool(self):
         """打开区域合并工具对话框"""

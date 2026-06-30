@@ -384,9 +384,12 @@ class TitleBar(Widget):
         mergeToolAction = QAction('区域合并工具', self)
         mergeToolAction.setShortcut(QKeySequence('Ctrl+Shift+M'))
         self.merge_tool_trigger = mergeToolAction.triggered
+        maskRoundCornerAction = QAction('Mask 圓角工具', self)
+        self.mask_round_corner_trigger = maskRoundCornerAction.triggered
         
         toolsMenu = QMenu(self.toolsToolBtn)
         toolsMenu.addAction(mergeToolAction)
+        toolsMenu.addAction(maskRoundCornerAction)
         self.toolsToolBtn.setMenu(toolsMenu)
         self.toolsToolBtn.setPopupMode(QToolButton.InstantPopup)
 

@@ -368,6 +368,61 @@ def square_pad_resize(img: np.ndarray, tgt_size: int):
     return img, down_scale_ratio, pad_h, pad_w
 
 
+def round_mask_components(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Round each connected mask component by trimming its bounding-box corners.
+
+    Example:
+        >>> mask = np.zeros((8, 8), dtype=np.uint8)
+        >>> mask[1:7, 1:7] = 255
+        >>> rounded = round_mask_components(mask, 2)
+        >>> rounded[1, 1] == 0 and rounded[3, 3] == 255
+        True
+    """
+    if mask is None:
+        return None
+    if radius <= 0:
+        return np.copy(mask)
+
+    source = mask
+    if len(source.shape) == 3:
+        source = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+
+    binary = (source > 0).astype(np.uint8)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, 8)
+    rounded = np.zeros_like(source, dtype=np.uint8)
+
+    for label_idx in range(1, num_labels):
+        x, y, w, h, area = stats[label_idx]
+        if area <= 0 or w <= 0 or h <= 0:
+            continue
+
+        component = (labels[y:y + h, x:x + w] == label_idx).astype(np.uint8) * 255
+        corner_radius = min(int(radius), w // 2, h // 2)
+        if corner_radius <= 0:
+            rounded[y:y + h, x:x + w] = cv2.bitwise_or(rounded[y:y + h, x:x + w], component)
+            continue
+
+        # Intersect with a rounded rectangle so the operation only removes corner pixels.
+        rounded_rect = np.zeros((h, w), dtype=np.uint8)
+        def draw_rect(x1, y1, x2, y2):
+            if x1 <= x2 and y1 <= y2:
+                cv2.rectangle(rounded_rect, (x1, y1), (x2, y2), 255, -1)
+
+        draw_rect(corner_radius, 0, w - corner_radius - 1, h - 1)
+        draw_rect(0, corner_radius, w - 1, h - corner_radius - 1)
+        cv2.circle(rounded_rect, (corner_radius, corner_radius), corner_radius, 255, -1)
+        cv2.circle(rounded_rect, (w - corner_radius - 1, corner_radius), corner_radius, 255, -1)
+        cv2.circle(rounded_rect, (corner_radius, h - corner_radius - 1), corner_radius, 255, -1)
+        cv2.circle(rounded_rect, (w - corner_radius - 1, h - corner_radius - 1), corner_radius, 255, -1)
+
+        rounded_component = cv2.bitwise_and(component, rounded_rect)
+        rounded[y:y + h, x:x + w] = cv2.bitwise_or(rounded[y:y + h, x:x + w], rounded_component)
+
+    if mask.dtype == np.bool_:
+        return rounded > 0
+    return rounded.astype(mask.dtype, copy=False)
+
+
 
 def get_block_mask(xywh: List, mask_array: np.ndarray, angle: int):
     x, y, w, h = xywh
