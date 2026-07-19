@@ -561,6 +561,14 @@ class RunPipelineDialog(QDialog):
             self._on_page_range_changed
         )
         layout.addWidget(self.page_range_progress)
+        self.export_json_after_run = self._add_checkbox_setting(
+            section,
+            layout,
+            'RunPipelineExportJsonAfterRun',
+            self.tr('Export text detection JSON after run'),
+            False,
+            lambda checked: None,
+        )
         self._refresh_progress()
 
     def _add_checkbox_setting(

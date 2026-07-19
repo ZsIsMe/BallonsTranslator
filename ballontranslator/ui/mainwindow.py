@@ -1854,18 +1854,21 @@ class MainWindow(mainwindow_cls):
         result = dialog.exec_()
         if result == RunPipelineDialog.CONTINUE:
             self._run_imgtrans_wo_textstyle_update = False
+            self._export_json_after_run = dialog.export_json_after_run.isChecked()
             self.on_run_imgtrans(continue_mode=True)
             return
         if result == RunPipelineDialog.RENDER:
             self._run_imgtrans_wo_textstyle_update = (
                 dialog.render_without_text_style_update.isChecked()
             )
+            self._export_json_after_run = False
             self.on_run_imgtrans(render_only=True)
             return
         if result != RunPipelineDialog.RUN:
             self._export_json_after_run = False
             return
         self._run_imgtrans_wo_textstyle_update = False
+        self._export_json_after_run = dialog.export_json_after_run.isChecked()
         self.on_run_imgtrans(pages_to_process=dialog.selected_pages())
 
     def on_run_imgtrans(
