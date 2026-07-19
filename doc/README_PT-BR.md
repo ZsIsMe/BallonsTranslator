@@ -1,13 +1,17 @@
-## BallonTranslator
+<p align="center">
+  <img
+    width="256"
+    alt="Spinning fox animation"
+    src="https://github.com/user-attachments/assets/fe44e9a6-c7da-4bc5-8421-87fd6c38a0ba"
+  />
+</p>
 
-[简体中文](/README.md) | [English](/README_EN.md) | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md)
+<h1 align="center">BallonsTranslator</h1>
 
-BallonTranslator é mais uma ferramenta auxiliada por computador, alimentada por deep learning, para a tradução de quadrinhos/mangás.
+<p align="center">BallonTranslator é mais uma ferramenta auxiliada por computador, alimentada por deep learning, para a tradução de quadrinhos/mangás.</p>
 
-<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
-
-<p align=center>
-**Pré-Visualização**
+<p align="center">
+  <a href="/README.md">简体中文</a> | <a href="/README_EN.md">English</a> | <a href="/doc/README_RU.md">Русский</a> | <a href="/doc/README_JA.md">日本語</a> | <a href="/doc/README_ES.md">Español</a> | <a href="/doc/README_FR.md">Français</a> | pt-BR | <a href="/doc/README_KO.md">한국어</a> | <a href="/doc/README_ID.md">Indonesia</a> | <a href="/doc/README_VI.md">Tiếng Việt</a>
 </p>
 
 ## Recursos
@@ -25,6 +29,50 @@ BallonTranslator é mais uma ferramenta auxiliada por computador, alimentada por
   - Suporta formatação de texto e [predefinições de estilo de texto](https://github.com/dmMaze/BallonsTranslator/pull/311). Textos traduzidos podem ser editados interativamente.
   - Permite localizar e substituir.
   - Permite exportar/importar para/de documentos do Word.
+
+* <details>
+  <summary><i>Tradução por LLM sensível ao contexto</i></summary>
+
+  **Histórico de traduções**
+
+  - Defina **LLM Context** como **+history** para mostrar ao `LLMTranslator` exemplos de páginas anteriores concluídas. Isso pode manter nomes, terminologia e tom mais consistentes. Execuções continuadas ou por intervalo também podem usar páginas anteriores elegíveis.
+  - **Token budget** controla quanto texto traduzido anterior é incluído, priorizando páginas mais recentes. A página atual, as instruções, o glossário e a resposta gerada precisam de espaço adicional. O padrão é `4096`.
+  - Um orçamento maior oferece mais contexto da história e remove páginas antigas com menos frequência, mas envia mais texto e pode demorar mais. Modelos locais também podem exigir muito mais RAM/VRAM. O padrão `4096` é deliberadamente conservador; provedores comuns com janelas de contexto grandes, como a DeepSeek, muitas vezes permitem um limite maior. Cerca de 70% do limite de contexto do modelo é um limite superior razoável (`90000` para 128K).
+  - O orçamento do histórico também afeta o cache de prompt. Enquanto o histórico cresce dentro do orçamento, solicitações consecutivas mantêm o mesmo início, que provedores como OpenAI e DeepSeek podem reutilizar com preço reduzido por token de entrada e, às vezes, menor latência. Quando o orçamento exige remover páginas antigas, esse início muda e o reaproveitamento do cache é reiniciado. Um orçamento maior reduz as reinicializações, mas envia mais histórico e, portanto, não garante menor custo total.
+
+  A tabela abaixo é uma estimativa aproximada para páginas de mangá usando a DeepSeek, em que tokens de entrada em cache custam 10% do preço dos tokens de entrada comuns. Os resultados reais variam conforme o projeto, o modelo e o provedor.
+
+  | Token budget | Histórico estimado mantido (páginas) | Custo total estimado em relação a não usar histórico |
+  |---:|---:|---:|
+  | `2048` | 3–4 | 1.65× |
+  | `4096` | 6–9 | 1.79× |
+  | `8192` | 12–19 | 2.10× |
+  | `16384` | 23–38 | 2.66× |
+
+  **Glossários reutilizáveis**
+
+  - Defina **Glossary File** na caixa de diálogo de execução como um arquivo UTF-8 `.json`, `.txt` ou `.tsv`. O arquivo é somente para leitura e pode ser reutilizado entre projetos.
+  - **Matching** envia apenas as entradas cujos termos de origem aparecem na página correspondente. **All** envia todas as entradas e pode usar consideravelmente mais tokens.
+  - Os formatos compatíveis incluem:
+
+    ```text
+    # Texto no formato Sakura
+    origem->tradução # observação opcional
+
+    # Texto separado por tabulações
+    origem<TAB>tradução<TAB>observação opcional
+    ```
+
+    ```json
+    [
+      {"src": "origem", "dst": "tradução", "info": "observação opcional"}
+    ]
+    ```
+
+  - A correspondência é literal e não diferencia maiúsculas de minúsculas. Entradas conflitantes, arquivos malformados, formatos incompatíveis e arquivos ausentes interrompem a tradução antes que uma solicitação seja enviada ao LLM.
+  - O contexto de páginas anteriores e a inclusão do glossário afetam apenas o `LLMTranslator`; os outros tradutores ignoram essas configurações.
+
+  </details>
 
 ## Instalação
 
@@ -58,9 +106,7 @@ curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts
 
 Se `curl` não estiver disponível, baixe o script com `wget -O ...`. O aplicativo inicia automaticamente após a instalação; depois, use `cd BallonsTranslator && ./launch.sh` para iniciá-lo novamente.
 
-O aplicativo verifica as dependências principais na inicialização. Ao selecionar um módulo que precisa de bibliotecas extras, o aplicativo solicitará a instalação das dependências opcionais ausentes (você também pode ativar a instalação automática nas configurações). Se o download dos modelos falhar, verifique sua rede/proxy, ou baixe os modelos necessários pelo [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) ou [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) e coloque-os manualmente no diretório `data`.
-
-O software possui verificação de atualização integrada; consulte Painel de configuração -> Startup & Update para detalhes.
+O aplicativo verifica as dependências principais na inicialização. Ao selecionar um módulo que precisa de bibliotecas extras, o aplicativo solicitará a instalação das dependências opcionais ausentes (você também pode ativar a instalação automática nas configurações).
 
 # Utilização
 

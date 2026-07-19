@@ -1,12 +1,17 @@
-# BallonTranslator
-[简体中文](/README.md) | [English](/README_EN.md) | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md)
+<p align="center">
+  <img
+    width="256"
+    alt="Spinning fox animation"
+    src="https://github.com/user-attachments/assets/fe44e9a6-c7da-4bc5-8421-87fd6c38a0ba"
+  />
+</p>
 
-ディープラーニングを活用したマンガ翻訳支援ツール。
+<h1 align="center">BallonsTranslator</h1>
 
-<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
+<p align="center">ディープラーニングを活用したマンガ翻訳支援ツール。</p>
 
-<p align=center>
-プレビュー
+<p align="center">
+  <a href="/README.md">简体中文</a> | <a href="/README_EN.md">English</a> | <a href="/doc/README_RU.md">Русский</a> | 日本語 | <a href="/doc/README_ES.md">Español</a> | <a href="/doc/README_FR.md">Français</a> | <a href="/doc/README_PT-BR.md">pt-BR</a> | <a href="/doc/README_KO.md">한국어</a> | <a href="/doc/README_ID.md">Indonesia</a> | <a href="/doc/README_VI.md">Tiếng Việt</a>
 </p>
 
 # 特徴
@@ -21,6 +26,50 @@
 
 * テキストの編集
   リッチテキストフォーマットをサポートし、翻訳されたテキストはインタラクティブに編集することができます。
+
+* <details>
+  <summary><i>文脈対応 LLM 翻訳</i></summary>
+
+  **翻訳履歴**
+
+  - **LLM Context** を **+history** に設定すると、`LLMTranslator` は以前に完了したページを例として参照します。人名、用語、口調の一貫性向上に役立ちます。続行実行や選択範囲でも、対象となる以前のページを利用できます。
+  - **Token budget** は、以前の訳文をどれだけ含めるかを制御し、新しいページを優先します。現在のページ、指示、用語集、生成応答には追加の空きが必要です。デフォルトは `4096` です。
+  - 予算を増やすと物語のコンテキストが増え、古いページの削除回数も減りますが、入力が増えて遅くなる場合があります。ローカルモデルでは RAM/VRAM も大幅に増えることがあります。デフォルトの `4096` は意図的に控えめな値です。DeepSeek など大きなコンテキストウィンドウを持つ一般的なプロバイダーでは、より高い上限を利用できる場合が多くあります。モデルのコンテキスト上限の約 70% が妥当な上限です（128K なら `90000`）。
+  - 履歴予算はプロンプトキャッシュにも影響します。履歴が予算内で増えている間は、連続するリクエストの先頭部分が同じままなので、OpenAI や DeepSeek などは入力トークンを割引価格で再利用でき、遅延が短くなる場合もあります。予算により古いページが削除されると先頭部分が変わり、キャッシュの再利用はリセットされます。予算を増やすとリセットは減りますが、送信する履歴も増えるため、総費用が必ず下がるわけではありません。
+
+  下表は DeepSeek を使った漫画ページの概算例です。DeepSeek のキャッシュ済み入力トークンは、通常の入力トークンの 10% の価格です。実際の結果はプロジェクト、モデル、プロバイダーによって異なります。
+
+  | Token budget | 保持される履歴の目安（ページ） | 履歴なしと比較した推定総費用 |
+  |---:|---:|---:|
+  | `2048` | 3–4 | 1.65× |
+  | `4096` | 6–9 | 1.79× |
+  | `8192` | 12–19 | 2.10× |
+  | `16384` | 23–38 | 2.66× |
+
+  **再利用可能な用語集**
+
+  - 実行ダイアログの **Glossary File** に UTF-8 の `.json`、`.txt`、`.tsv` ファイルを指定します。ファイルは読み取り専用で、複数のプロジェクトで再利用できます。
+  - **Matching** は該当ページに原語が現れる項目だけを送信します。**All** は全項目を送信するため、トークン使用量が大きく増える場合があります。
+  - 対応形式：
+
+    ```text
+    # Sakura 形式
+    原語->訳語 # 任意の注記
+
+    # タブ区切り
+    原語<TAB>訳語<TAB>任意の注記
+    ```
+
+    ```json
+    [
+      {"src": "原語", "dst": "訳語", "info": "任意の注記"}
+    ]
+    ```
+
+  - 大文字と小文字を区別しないリテラル一致です。競合する項目、不正な形式、未対応の拡張子、存在しないファイルがある場合、LLM リクエストを送信する前に翻訳を停止します。
+  - 過去ページのコンテキストと用語集の挿入は `LLMTranslator` のみに影響し、他の翻訳器はこれらの設定を無視します。
+
+  </details>
 
 # インストール
 
@@ -52,9 +101,7 @@ curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts
 
 `curl` が使用できない場合は、代わりに `wget -O ...` でスクリプトをダウンロードしてください。インストール後にアプリは自動的に起動します。次回以降は `cd BallonsTranslator && ./launch.sh` で再起動できます。
 
-アプリは起動時にコア依存関係を確認します。追加ライブラリが必要なモジュールを選択すると、不足している任意依存関係のインストールを促します（設定で自動インストールを有効にすることもできます）。モデルのダウンロードに失敗した場合は、ネットワークやプロキシを確認するか、必要なモデルを [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) または [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) からダウンロードして、手動で `data` ディレクトリに配置してください。
-
-ソフトウェアには更新チェック機能が組み込まれています。詳細は設定パネル -> Startup & Update を参照してください。
+アプリは起動時にコア依存関係を確認します。追加ライブラリが必要なモジュールを選択すると、不足している任意依存関係のインストールを促します（設定で自動インストールを有効にすることもできます）。
 
 ## 完全自動翻訳
 **万が一、プログラムがクラッシュして情報が残らなかった場合に備えて、以下のgifを参考に、ターミナルで実行することをお勧めします。**また、初回実行時に希望するトランスレータを選択し、ソース言語とターゲット言語を設定してください。翻訳が必要な画像が入ったフォルダを開き、

@@ -8,18 +8,27 @@ import time
 import cv2
 
 from tqdm import tqdm
-from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QLabel, QPushButton
+from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
-from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QKeyEvent, QPainter, QClipboard, QImage
+from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QPainter, QClipboard
 
 from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.text_processing import is_cjk, full_len, half_len
+from ballontranslator.utils.text_processing import is_cjk
 from ballontranslator.utils.textblock import TextBlock, TextAlignment
 from ballontranslator.utils import shared
 from ballontranslator.utils.message import create_error_dialog, create_info_dialog
 from ballontranslator.modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
 from .misc import parse_stylesheet, set_html_family, QKEY
-from ballontranslator.utils.config import ProgramConfig, pcfg, save_config, text_styles, save_text_styles, load_textstyle_from, FontFormat
+from ballontranslator.utils.config import (
+    FontFormat,
+    ProgramConfig,
+    RunStatus,
+    load_textstyle_from,
+    pcfg,
+    save_config,
+    save_text_styles,
+    text_styles,
+)
 from ballontranslator.utils.proj_imgtrans import ProjImgTrans
 from .canvas import Canvas
 from .configpanel import ConfigPanel
@@ -29,13 +38,17 @@ from .drawingpanel import DrawingPanel
 from .scenetext_manager import SceneTextManager, TextPanel, PasteSrcItemsCommand
 from .mainwindowbars import TitleBar, LeftBar, BottomBar
 from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread, ExportDocLabelPlusThread
+from .menu_style import install_app_style_filters
 from .update_thread import UpdateCheckThread
+from .update_dialog import UpdateReleaseDialog
+from .run_pipeline_dialog import RunPipelineDialog
 from .custom_widget import Widget, ViewWidget
 from .global_search_widget import GlobalSearchWidget
 from .textedit_commands import GlobalRepalceAllCommand
 from .framelesswindow import FramelessWindow, FramelessMoveResize
 from .drawing_commands import RunBlkTransCommand
 from .keywordsubwidget import KeywordSubWidget
+from .module_param_i18n import ModuleParamTranslator, register_module_param_translator
 from . import shared_widget as SW
 from .custom_widget import MessageBox, FrameLessMessageBox, ImgtransProgressMessageBox, ProgressMessageBox
 
@@ -84,29 +97,45 @@ class MainWindow(mainwindow_cls):
     save_on_page_changed = True
     opening_dir = False
     page_changing = False
-    postprocess_mt_toggle = True
 
     translator = None
 
     restart_signal = Signal()
     create_errdialog = Signal(str, str, str)
     create_infodialog = Signal(dict)
+    show_llm_key_dialog = Signal(str, str)
+    show_llm_model_dialog = Signal(str, str, str)
+    show_llm_base_url_dialog = Signal(str, str, str)
     
     def __init__(self, app: QApplication, config: ProgramConfig, open_dir='', **exec_args) -> None:
         super().__init__()
+
+        self.app = app
+        install_app_style_filters(self.app)
+        self.resetStyleSheet()
 
         shared.create_errdialog_in_mainthread = self.create_errdialog.emit
         self.create_errdialog.connect(self.on_create_errdialog)
         shared.create_infodialog_in_mainthread = self.create_infodialog.emit
         self.create_infodialog.connect(self.on_create_infodialog)
+        shared.show_llm_key_dialog_in_mainthread = self.show_llm_key_dialog.emit
+        self.show_llm_key_dialog.connect(self.on_show_llm_key_dialog)
+        shared.show_llm_model_dialog_in_mainthread = self.show_llm_model_dialog.emit
+        self.show_llm_model_dialog.connect(self.on_show_llm_model_dialog)
+        shared.show_llm_base_url_dialog_in_mainthread = self.show_llm_base_url_dialog.emit
+        self.show_llm_base_url_dialog.connect(self.on_show_llm_base_url_dialog)
+        if not shared.HEADLESS:
+            self.module_param_translator = ModuleParamTranslator(parent=self)
+            register_module_param_translator(self.module_param_translator)
         shared.register_view_widget = self.register_view_widget
 
-        self.app = app
         self.backup_blkstyles = []
         self._run_imgtrans_wo_textstyle_update = False
         self._export_json_after_run = False
         self.ps_marked_paths = []
         self.ps_marked_set = set()
+        self._render_only = False
+        self._render_global_format = None
 
         self.setupThread()
         self.setupUi()
@@ -114,8 +143,8 @@ class MainWindow(mainwindow_cls):
         self.setupConfig()
         self.setupShortcuts()
         self.setupRegisterWidget()
-        # self.showMaximized()
-        FramelessMoveResize.toggleMaxState(self)
+        if not shared.ON_WINDOWS:
+            FramelessMoveResize.toggleMaxState(self)
         self.setAcceptDrops(True)
 
         if open_dir != '' and osp.exists(open_dir):
@@ -135,15 +164,26 @@ class MainWindow(mainwindow_cls):
                 self.hideSystemTitleBar()
             self.showMaximized()
 
-        if not shared.HEADLESS and pcfg.check_update_on_startup:
+        show_release_info = exec_args.get('show_release_info', False)
+        if not shared.HEADLESS and (show_release_info or pcfg.check_update_on_startup):
             # Defer startup update checks until the event loop can paint progress.
-            QTimer.singleShot(500, lambda: self.check_for_updates(manual=False))
+            QTimer.singleShot(
+                500,
+                lambda: self.check_for_updates(
+                    manual=False,
+                    show_release_info=show_release_info,
+                ),
+            )
 
     def setStyleSheet(self, styleSheet: str) -> None:
-        self.imgtrans_progress_msgbox.setStyleSheet(styleSheet)
-        self.export_doc_thread.progress_bar.setStyleSheet(styleSheet)
-        self.import_doc_thread.progress_bar.setStyleSheet(styleSheet)
-        self.export_doc_labelplus_thread.progress_bar.setStyleSheet(styleSheet)
+        if hasattr(self, 'imgtrans_progress_msgbox'):
+            self.imgtrans_progress_msgbox.setStyleSheet(styleSheet)
+        if hasattr(self, 'export_doc_thread'):
+            self.export_doc_thread.progress_bar.setStyleSheet(styleSheet)
+        if hasattr(self, 'import_doc_thread'):
+            self.import_doc_thread.progress_bar.setStyleSheet(styleSheet)
+        if hasattr(self, 'export_doc_labelplus_thread'):
+            self.export_doc_labelplus_thread.progress_bar.setStyleSheet(styleSheet)
         if hasattr(self, 'update_progress_msgbox'):
             self.update_progress_msgbox.setStyleSheet(styleSheet)
         if hasattr(self, 'configPanel'):
@@ -168,17 +208,25 @@ class MainWindow(mainwindow_cls):
         self.update_progress_msgbox = ProgressMessageBox(self.tr('Updating: '), False, self)
         self._update_progress_visible = False
 
-    def resetStyleSheet(self, reverse_icon: bool = False):
+    def resetStyleSheet(self):
         theme = 'eva-dark' if pcfg.darkmode else 'eva-light'
-        self.setStyleSheet(parse_stylesheet(theme, reverse_icon))
+        application_stylesheet = parse_stylesheet(theme)
+        if self.styleSheet() != application_stylesheet:
+            self.setStyleSheet(application_stylesheet)
 
     def setupUi(self):
         screen_size = QGuiApplication.primaryScreen().geometry().size()
         self.setMinimumWidth(screen_size.width() // 2)
         self.configPanel = ConfigPanel(self)
-        self.configPanel.trans_config_panel.show_pre_MT_keyword_window.connect(self.show_pre_MT_keyword_window)
-        self.configPanel.trans_config_panel.show_MT_keyword_window.connect(self.show_MT_keyword_window)
-        self.configPanel.trans_config_panel.show_OCR_keyword_window.connect(self.show_OCR_keyword_window)
+        self.configPanel.trans_config_panel.show_pre_MT_keyword_window.connect(
+            self.show_pre_MT_keyword_window
+        )
+        self.configPanel.trans_config_panel.show_MT_keyword_window.connect(
+            self.show_MT_keyword_window
+        )
+        self.configPanel.trans_config_panel.show_OCR_keyword_window.connect(
+            self.show_OCR_keyword_window
+        )
 
         self.leftBar = LeftBar(self)
         self.leftBar.showPageListLabel.clicked.connect(self.pageLabelStateChanged)
@@ -199,6 +247,7 @@ class MainWindow(mainwindow_cls):
         self.leftBar.import_trans_txt.connect(self.on_import_trans_txt)
 
         self.pageList = PageListView()
+        self.pageList.setObjectName('PageListArea')
         self.pageList.reveal_file.connect(self.on_reveal_file)
         self.pageList.mark_to_edit.connect(self.on_mark_to_edit)
         self.pageList.open_with_ps_now.connect(self.on_open_with_ps_now)
@@ -304,9 +353,7 @@ class MainWindow(mainwindow_cls):
         self.comicTransSplitter.setStretchFactor(0, 1)
         self.comicTransSplitter.setStretchFactor(1, 10)
         self.comicTransSplitter.setStretchFactor(2, 1)
-        self.imgtrans_progress_msgbox = ImgtransProgressMessageBox()
-        self.resetStyleSheet()
-
+        self.imgtrans_progress_msgbox = ImgtransProgressMessageBox(self)
     def on_finish_settranslator(self):
         module_manager = self.module_manager
         translator = module_manager.translator
@@ -316,20 +363,28 @@ class MainWindow(mainwindow_cls):
             self.setTranslatorSelectionFromMetadata(name)
             LOGGER.info('Translator set to {}'.format(name))
         
-    def on_enable_module(self, idx, checked):
-        if idx == 0:
-            pcfg.module.enable_detect = checked
-            self.bottomBar.textdet_selector.setVisible(checked)
-        elif idx == 1:
-            pcfg.module.enable_ocr = checked
-            self.bottomBar.ocr_selector.setVisible(checked)
-        elif idx == 2:
-            pcfg.module.enable_translate = checked
-            self.bottomBar.trans_selector.setVisible(checked)
-        elif idx == 3:
-            pcfg.module.enable_inpaint = checked
-            self.bottomBar.inpaint_selector.setVisible(checked)
-        pcfg.module.update_finish_code()
+    def on_show_module(self, idx, checked):
+        visibility_attrs = (
+            'show_textdetector_tool',
+            'show_ocr_tool',
+            'show_translator_tool',
+            'show_inpainter_tool',
+        )
+        if not 0 <= idx < len(visibility_attrs):
+            return
+        setattr(pcfg, visibility_attrs[idx], checked)
+        self._set_module_tool_visibility(idx, checked)
+        save_config()
+
+    def _set_module_tool_visibility(self, idx, visible):
+        module_widgets = (
+            self.bottomBar.textdet_selector,
+            self.bottomBar.ocr_selector,
+            self.bottomBar.trans_selector,
+            self.bottomBar.inpaint_selector,
+        )
+        if 0 <= idx < len(module_widgets):
+            module_widgets[idx].setVisible(visible)
 
     def setTranslatorSelectionFromMetadata(self, translator: str = None):
         metadata = self.module_manager.translator_metadata(translator)
@@ -351,17 +406,23 @@ class MainWindow(mainwindow_cls):
         )
 
     def on_module_selection_changed(self, module_key: str, module_name: str):
+        profile_id = ''
         if module_key == 'translator':
             self.setTranslatorSelectionFromMetadata(module_name)
+            profile_id = pcfg.module.translator_llm_id
         elif module_key == 'textdetector':
             self.configPanel.detect_config_panel.setDetector(module_name)
             self.bottomBar.textdet_selector.setSelectedValue(module_name)
         elif module_key == 'ocr':
             self.configPanel.ocr_config_panel.setOCR(module_name)
             self.bottomBar.ocr_selector.setSelectedValue(module_name)
+            profile_id = pcfg.module.ocr_llm_id
         elif module_key == 'inpainter':
             self.configPanel.inpaint_config_panel.setInpainter(module_name)
             self.bottomBar.inpaint_selector.setSelectedValue(module_name)
+            profile_id = pcfg.module.inpaint_llm_id
+        if profile_id:
+            self.configPanel.llm_profiles_panel.refreshSelectionBorders(profile_id)
 
     def validateModuleSelections(self):
         def valid_or_first(value, valid_values):
@@ -387,10 +448,14 @@ class MainWindow(mainwindow_cls):
         self.bottomBar.inpaint_selector.setSelectedValue(pcfg.module.inpainter)
 
         self.module_manager = module_manager = ModuleManager(self.imgtrans_proj)
-        module_manager.finish_translate_page.connect(self.finishTranslatePage)
         module_manager.imgtrans_pipeline_finished.connect(self.on_imgtrans_pipeline_finished)
         module_manager.page_trans_finished.connect(self.on_pagtrans_finished)
-        module_manager.setupThread(self.configPanel, self.imgtrans_progress_msgbox, self.ocr_postprocess, self.translate_preprocess, self.translate_postprocess, parent_widget=self)
+        module_manager.setupThread(
+            self.configPanel,
+            self.imgtrans_progress_msgbox,
+            self.ocr_postprocess,
+            parent_widget=self,
+        )
         module_manager.module_selection_changed.connect(self.on_module_selection_changed)
         module_manager.progress_msgbox.showed.connect(self.on_imgtrans_progressbox_showed)
         # Preparation and RUN dialogs share placement so the first RUN is stable.
@@ -403,20 +468,35 @@ class MainWindow(mainwindow_cls):
         self.bottomBar.textdet_selector.selector.currentTextChanged.connect(self.on_textdet_changed)
         self.bottomBar.inpaint_selector.selector.currentTextChanged.connect(self.on_inpaint_changed)
         self.bottomBar.trans_selector.cfg_clicked.connect(self.to_trans_config)
+        self.bottomBar.trans_selector.edit_clicked.connect(self.focus_llm_profile)
         self.bottomBar.trans_selector.selector.currentTextChanged.connect(self.on_trans_changed)
+        self.bottomBar.trans_selector.llm_profile_changed.connect(self.on_llm_profile_changed)
         self.bottomBar.trans_selector.tgt_selector.currentTextChanged.connect(self.on_trans_tgt_changed)
         self.bottomBar.trans_selector.src_selector.currentTextChanged.connect(self.on_trans_src_changed)
         self.bottomBar.textdet_selector.cfg_clicked.connect(self.to_detect_config)
         self.bottomBar.inpaint_selector.cfg_clicked.connect(self.to_inpaint_config)
+        self.bottomBar.inpaint_selector.edit_clicked.connect(self.focus_llm_profile)
+        self.bottomBar.inpaint_selector.llm_profile_changed.connect(self.on_inpaint_llm_profile_changed)
         self.bottomBar.ocr_selector.cfg_clicked.connect(self.to_ocr_config)
+        self.bottomBar.ocr_selector.edit_clicked.connect(self.focus_llm_profile)
         self.bottomBar.ocr_selector.selector.currentTextChanged.connect(self.on_ocr_changed)
-        self.bottomBar.textdet_selector.setVisible(pcfg.module.enable_detect)
-        self.bottomBar.ocr_selector.setVisible(pcfg.module.enable_ocr)
-        self.bottomBar.trans_selector.setVisible(pcfg.module.enable_translate)
-        self.bottomBar.inpaint_selector.setVisible(pcfg.module.enable_inpaint)
+        self.bottomBar.ocr_selector.llm_profile_changed.connect(self.on_ocr_llm_profile_changed)
+        for idx, action in enumerate(self.titleBar.moduleVisibilityActions):
+            self._set_module_tool_visibility(idx, action.isChecked())
 
-        self.configPanel.trans_config_panel.target_combobox.currentTextChanged.connect(self.on_trans_tgt_changed)
-        self.configPanel.trans_config_panel.source_combobox.currentTextChanged.connect(self.on_trans_src_changed)
+        self.configPanel.trans_config_panel.llm_profile_changed.connect(self.on_llm_profile_changed)
+        self.configPanel.trans_config_panel.llm_profile_config_clicked.connect(self.focus_llm_profile)
+        self.configPanel.llm_profiles_panel.profile_ui_updated.connect(self.on_llm_profile_ui_updated)
+        self.configPanel.llm_profiles_panel.profile_summary_changed.connect(self.on_llm_profile_summary_changed)
+        self.configPanel.llm_profiles_panel.set_translator_requested.connect(
+            self.bottomBar.trans_selector.selectLLMProfile
+        )
+        self.configPanel.llm_profiles_panel.set_ocr_requested.connect(
+            self.bottomBar.ocr_selector.selectLLMProfile
+        )
+        self.configPanel.llm_profiles_panel.set_inpainter_requested.connect(
+            self.bottomBar.inpaint_selector.selectLLMProfile
+        )
 
         self.drawingPanel.maskTransperancySlider.setValue(int(pcfg.mask_transparency * 100))
         self.leftBar.initRecentProjMenu(pcfg.recent_proj_list)
@@ -437,7 +517,8 @@ class MainWindow(mainwindow_cls):
         self.show_source_text(pcfg.show_source_text)
 
         self.leftBar.run_imgtrans_clicked.connect(self.run_imgtrans)
-        self.titleBar.run_and_export_trigger.connect(self.on_run_and_export)
+        if hasattr(self.titleBar, 'run_and_export_trigger'):
+            self.titleBar.run_and_export_trigger.connect(self.on_run_and_export)
 
         self.titleBar.darkModeAction.setChecked(pcfg.darkmode)
 
@@ -508,16 +589,16 @@ class MainWindow(mainwindow_cls):
 
     def setupConfigUI(self):
         self.centralStackWidget.setCurrentIndex(0)
-        self.configPanel.showConfigDialog('application')
+        self.configPanel.showConfigDialog()
 
-    def check_for_updates(self, manual: bool = True):
+    def check_for_updates(self, manual: bool = True, show_release_info: bool = False):
         if self.update_thread.isBusy():
             LOGGER.info('Ignored update check request because an update check or update is already running.')
             return
         self._manual_update_check = manual
         self.configPanel.setUpdateChecking(True)
         self.configPanel.setLatestVersion(self.tr('Checking...'))
-        self.update_thread.checkLatest()
+        self.update_thread.checkLatest(show_release_info=show_release_info)
 
     def apply_confirmed_update(self, release_info, current_version: str):
         if self.update_thread.isBusy():
@@ -538,11 +619,10 @@ class MainWindow(mainwindow_cls):
         message = payload.get('message', '')
         event = payload.get('event', '')
         task_names = {
+            'backup_source': self.tr('Backing up current version: '),
             'download_start': self.tr('Downloading update: '),
             'download_progress': self.tr('Downloading update: '),
             'download_done': self.tr('Downloading update: '),
-            'backup_source': self.tr('Backing up source: '),
-            'backup_skip': self.tr('Backing up source: '),
             'git_safety': self.tr('Saving local changes: '),
             'extract_source': self.tr('Installing update: '),
             'replace_source': self.tr('Installing update: '),
@@ -559,8 +639,9 @@ class MainWindow(mainwindow_cls):
         if result.latest_version:
             self.configPanel.setLatestVersion(result.latest_version)
 
-        if result.status == 'available':
-            if self.confirm_update_release(result):
+        if result.status in {'available', 'preview'}:
+            allow_update = result.status == 'available'
+            if self.confirm_update_release(result, allow_update=allow_update) and allow_update:
                 QTimer.singleShot(
                     0,
                     lambda info=result.release_info, current=result.current_version: self.apply_confirmed_update(info, current),
@@ -576,7 +657,14 @@ class MainWindow(mainwindow_cls):
                 LOGGER.info(f'BallonsTranslator is already up-to-date: {result.current_version}')
             return
 
-        self.show_update_installed_dialog(result)
+        if result.status == 'updated':
+            # launch.restart() closes this window synchronously. closeEvent()
+            # conditionally saves the project and waits for image IO before exec.
+            self.update_thread.wait()
+            self.restart_signal.emit()
+            return
+
+        LOGGER.warning(f'Ignored unexpected updater result status: {result.status}')
 
     def on_update_failed(self, error_msg: str, detail_traceback: str):
         if self._update_progress_visible:
@@ -589,92 +677,15 @@ class MainWindow(mainwindow_cls):
             '',
         )
 
-    def confirm_update_release(self, result) -> bool:
-        release_info = result.release_info
-        dialog = QDialog(self)
-        dialog.setWindowTitle(self.tr('Update Available'))
-        layout = QVBoxLayout(dialog)
-
-        title_label = QLabel(
-            self.tr('A new version is available.')
-            + f'\n{result.current_version} -> {result.latest_version}',
-            dialog,
+    def confirm_update_release(self, result, allow_update: bool = True) -> bool:
+        dialog = UpdateReleaseDialog(
+            result,
+            self,
+            display_language=pcfg.display_lang,
+            allow_update=allow_update,
         )
-        title_label.setWordWrap(True)
-        layout.addWidget(title_label)
-
-        info_lines = []
-        if release_info.name:
-            info_lines.append(release_info.name)
-        if release_info.published_at:
-            info_lines.append(self.tr('Published: ') + release_info.published_at)
-        if release_info.html_url:
-            info_lines.append(release_info.html_url)
-        if info_lines:
-            meta_label = QLabel('\n'.join(info_lines), dialog)
-            meta_label.setWordWrap(True)
-            meta_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-            meta_label.setOpenExternalLinks(True)
-            layout.addWidget(meta_label)
-
-        release_notes = QPlainTextEdit(dialog)
-        release_notes.setReadOnly(True)
-        release_notes.setPlainText(release_info.body or self.tr('No release notes.'))
-        release_notes.setMinimumSize(620, 320)
-        layout.addWidget(release_notes)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        update_btn = QPushButton(self.tr('Update'), dialog)
-        cancel_btn = QPushButton(self.tr('Cancel'), dialog)
-        update_btn.clicked.connect(dialog.accept)
-        cancel_btn.clicked.connect(dialog.reject)
-        button_layout.addWidget(update_btn)
-        button_layout.addWidget(cancel_btn)
-        layout.addLayout(button_layout)
-
         accepted = getattr(getattr(QDialog, 'DialogCode', QDialog), 'Accepted')
         return dialog.exec() == accepted
-
-    def show_update_installed_dialog(self, result):
-        dialog = QDialog(self)
-        dialog.setWindowTitle(self.tr('Update Installed'))
-        layout = QVBoxLayout(dialog)
-
-        title_label = QLabel(
-            self.tr('Update installed. Restart BallonsTranslator to use the new version.')
-            + f'\n{result.current_version} -> {result.latest_version}',
-            dialog,
-        )
-        title_label.setWordWrap(True)
-        layout.addWidget(title_label)
-
-        details = []
-        if result.backup_path:
-            details.append(self.tr('Backup: ') + result.backup_path)
-        if result.git_message:
-            details.append(self.tr('If you are not a developer, you can ignore the following git information.'))
-            details.append(result.git_message)
-        if details:
-            detail_text = QPlainTextEdit(dialog)
-            detail_text.setReadOnly(True)
-            detail_text.setPlainText('\n'.join(details))
-            detail_text.setMinimumSize(620, 180)
-            layout.addWidget(detail_text)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        restart_btn = QPushButton(self.tr('Restart Now'), dialog)
-        later_btn = QPushButton(self.tr('Later'), dialog)
-        restart_btn.clicked.connect(dialog.accept)
-        later_btn.clicked.connect(dialog.reject)
-        button_layout.addWidget(restart_btn)
-        button_layout.addWidget(later_btn)
-        layout.addLayout(button_layout)
-
-        accepted = getattr(getattr(QDialog, 'DialogCode', QDialog), 'Accepted')
-        if dialog.exec() == accepted:
-            self.restart_signal.emit()
 
     def set_display_lang(self, lang: str):
         self.retranslateUI()
@@ -867,10 +878,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.replacePreMTkeyword_trigger.connect(self.show_pre_MT_keyword_window)
         self.titleBar.replaceMTkeyword_trigger.connect(self.show_MT_keyword_window)
         self.titleBar.replaceOCRkeyword_trigger.connect(self.show_OCR_keyword_window)
-        self.titleBar.run_trigger.connect(self.leftBar.runImgtransBtn.click)
-        self.titleBar.run_woupdate_textstyle_trigger.connect(self.run_imgtrans_wo_textstyle_update)
-        self.titleBar.translate_page_trigger.connect(self.on_transpagebtn_pressed)
-        self.titleBar.enable_module.connect(self.on_enable_module)
+        self.titleBar.show_module.connect(self.on_show_module)
         self.titleBar.importtstyle_trigger.connect(self.import_tstyles)
         self.titleBar.exporttstyle_trigger.connect(self.export_tstyles)
         self.titleBar.darkmode_trigger.connect(self.on_darkmode_triggered)
@@ -1510,6 +1518,13 @@ class MainWindow(mainwindow_cls):
     def to_trans_config(self):
         self.configPanel.focusOnTranslator()
 
+    def focus_llm_profile(self, profile_id: str = None, expand_details: bool = True, target: str = 'api_key'):
+        self.configPanel.focusOnLLMProfile(
+            profile_id or pcfg.module.translator_llm_id,
+            expand_details=expand_details,
+            target=target,
+        )
+
     def to_inpaint_config(self):
         self.configPanel.focusOnInpaint()
 
@@ -1530,43 +1545,70 @@ class MainWindow(mainwindow_cls):
         tgt_selector = self.configPanel.ocr_config_panel.module_combobox
         if tgt_selector.currentText() != module and module in GET_VALID_OCR():
             tgt_selector.setCurrentText(module)
+        self.bottomBar.ocr_selector.updateButtonText()
 
     def on_trans_changed(self):
         module = self.bottomBar.trans_selector.selector.currentText()
         tgt_selector = self.configPanel.trans_config_panel.module_combobox
         if tgt_selector.currentText() != module and module in GET_VALID_TRANSLATORS():
             tgt_selector.setCurrentText(module)
+        self.bottomBar.trans_selector.updateButtonText()
 
-    def on_trans_src_changed(self):
+    def on_llm_profile_changed(self, profile_id: str):
+        if profile_id:
+            pcfg.module.translator_llm_id = profile_id
+            self.configPanel.llm_profiles_panel.syncProfile(profile_id)
+            self.configPanel.llm_profiles_panel.setSelectedProfile('translator', profile_id)
+        self.configPanel.trans_config_panel.refreshLLMProfiles()
+        self.bottomBar.trans_selector.updateButtonText()
+
+    def on_ocr_llm_profile_changed(self, profile_id: str):
+        if profile_id:
+            pcfg.module.ocr_llm_id = profile_id
+            self.configPanel.llm_profiles_panel.syncProfile(profile_id)
+            self.configPanel.llm_profiles_panel.setSelectedProfile('ocr', profile_id)
+        self.bottomBar.ocr_selector.updateButtonText()
+
+    def on_inpaint_llm_profile_changed(self, profile_id: str):
+        if profile_id:
+            pcfg.module.inpaint_llm_id = profile_id
+            self.configPanel.llm_profiles_panel.syncProfile(profile_id)
+            self.configPanel.llm_profiles_panel.setSelectedProfile('inpainter', profile_id)
+        self.bottomBar.inpaint_selector.updateButtonText()
+
+    def on_llm_profile_ui_updated(self):
+        self.configPanel.trans_config_panel.refreshLLMProfiles()
+        self.bottomBar.trans_selector.updateButtonText()
+        self.bottomBar.ocr_selector.updateButtonText()
+        self.bottomBar.inpaint_selector.updateButtonText()
+
+    def on_llm_profile_summary_changed(self):
+        self.bottomBar.trans_selector.updateButtonText()
+        self.bottomBar.ocr_selector.updateButtonText()
+        self.bottomBar.inpaint_selector.updateButtonText()
+
+    def on_trans_src_changed(self, text: str = None):
         sender = self.sender()
-        text = sender.currentText()
+        if text is None:
+            text = sender.currentText()
         translator = self.module_manager.translator
         if translator is not None and translator.name == pcfg.module.translator:
             translator.set_source(text)
         pcfg.module.translate_source = text
-        combobox = self.configPanel.trans_config_panel.source_combobox
-        if sender != combobox:
-            combobox.blockSignals(True)
-            combobox.setCurrentText(text)
-            combobox.blockSignals(False)
         combobox = self.bottomBar.trans_selector.src_selector
         if sender != combobox:
             combobox.blockSignals(True)
             combobox.setCurrentText(text)
             combobox.blockSignals(False)
 
-    def on_trans_tgt_changed(self):
+    def on_trans_tgt_changed(self, text: str = None):
         sender = self.sender()
-        text = sender.currentText()
+        if text is None:
+            text = sender.currentText()
         translator = self.module_manager.translator
         if translator is not None and translator.name == pcfg.module.translator:
             translator.set_target(text)
         pcfg.module.translate_target = text
-        combobox = self.configPanel.trans_config_panel.target_combobox
-        if sender != combobox:
-            combobox.blockSignals(True)
-            combobox.setCurrentText(text)
-            combobox.blockSignals(False)
         combobox = self.bottomBar.trans_selector.tgt_selector
         if sender != combobox:
             combobox.blockSignals(True)
@@ -1578,6 +1620,7 @@ class MainWindow(mainwindow_cls):
         tgt_selector = self.configPanel.inpaint_config_panel.module_combobox
         if tgt_selector.currentText() != module and module in GET_VALID_INPAINTERS():
             tgt_selector.setCurrentText(module)
+        self.bottomBar.inpaint_selector.updateButtonText()
 
     def on_transpagebtn_pressed(self, run_target: bool):
         page_key = self.imgtrans_proj.current_img
@@ -1597,7 +1640,6 @@ class MainWindow(mainwindow_cls):
         tgt_img = self.imgtrans_proj.img_array
         if tgt_img is None:
             return False
-        tgt_mask = self.imgtrans_proj.mask_array
         
         if len(blkitem_list) < 1:
             return False
@@ -1610,23 +1652,27 @@ class MainWindow(mainwindow_cls):
         for blkitem in blkitem_list:
             blk: TextBlock = blkitem.blk
             blk._bounding_rect = blkitem.absBoundingRect()
-            blk.text = self.st_manager.pairwidget_list[blkitem.idx].e_source.toPlainText()
+            blk.text = self.st_manager.pairwidget_list[
+                blkitem.idx
+            ].e_source.toPlainText()
             blk_ids.append(blkitem.idx)
             blk.set_lines_by_xywh(blk._bounding_rect, angle=-blk.angle, x_range=[0, im_w-1], y_range=[0, im_h-1], adjust_bbox=True)
             blk_list.append(blk)
 
-        self.module_manager.runBlktransPipeline(blk_list, tgt_img, mode, blk_ids, tgt_mask = tgt_mask)
+        page_key = self.imgtrans_proj.current_img
+        self.module_manager.runBlktransPipeline(
+            blk_list,
+            mode,
+            blk_ids,
+            page_key=page_key,
+        )
         return True
-
-
-    def finishTranslatePage(self, page_key):
-        if page_key == self.imgtrans_proj.current_img:
-            self.st_manager.updateTranslation()
 
     def on_imgtrans_pipeline_finished(self):
         self.backup_blkstyles.clear()
         self._run_imgtrans_wo_textstyle_update = False
-        self.postprocess_mt_toggle = True
+        self._render_only = False
+        self._render_global_format = None
         if pcfg.module.empty_runcache and not shared.HEADLESS:
             self.module_manager.unload_all_models()
         if self._export_json_after_run or (shared.HEADLESS and shared.args.export_json_labelplus):
@@ -1640,26 +1686,11 @@ class MainWindow(mainwindow_cls):
             self.run_next_dir()
 
     def postprocess_translations(self, blk_list: List[TextBlock]) -> None:
-        src_is_cjk = is_cjk(pcfg.module.translate_source)
-        tgt_is_cjk = is_cjk(pcfg.module.translate_target)
-        if tgt_is_cjk:
-            for blk in blk_list:
-                if src_is_cjk:
-                    blk.translation = full_len(blk.translation)
-                else:
-                    blk.translation = half_len(blk.translation)
-                    blk.translation = re.sub(r'([?.!"])\s+', r'\1', blk.translation)    # remove spaces following punctuations
-        else:
+        if not is_cjk(pcfg.module.translate_target):
             for blk in blk_list:
                 if blk.vertical:
                     blk.alignment = TextAlignment.Center
-                blk.translation = half_len(blk.translation)
                 blk.vertical = False
-
-        for blk in blk_list:
-            blk.translation = self.mtSubWidget.sub_text(blk.translation)
-            if pcfg.let_uppercase_flag:
-                blk.translation = blk.translation.upper()
 
     def on_pagtrans_finished(self, page_index: int):
         blk_list = self.imgtrans_proj.get_blklist_byidx(page_index)
@@ -1678,10 +1709,17 @@ class MainWindow(mainwindow_cls):
         override_effect = pcfg.let_fnteffect_flag == 1
         override_writing_mode = pcfg.let_writing_mode_flag == 1
         override_font_family = pcfg.let_family_flag == 1
-        gf = self.textPanel.formatpanel.global_format
+        gf = self._render_global_format
+        if gf is None:
+            gf = self.textPanel.formatpanel.global_format
 
-        inpaint_only = pcfg.module.enable_inpaint
-        inpaint_only = inpaint_only and not (pcfg.module.enable_detect or pcfg.module.enable_ocr or pcfg.module.enable_translate)
+        enable_detect = pcfg.module.enable_detect and not self._render_only
+        enable_ocr = pcfg.module.enable_ocr and not self._render_only
+        enable_translate = pcfg.module.enable_translate and not self._render_only
+        enable_inpaint = pcfg.module.enable_inpaint and not self._render_only
+        inpaint_only = enable_inpaint and not (
+            enable_detect or enable_ocr or enable_translate
+        )
         
         if not inpaint_only:
             for ii, blk in enumerate(blk_list):
@@ -1691,11 +1729,11 @@ class MainWindow(mainwindow_cls):
                     if override_fnt_size or \
                         blk.font_size < 0:  # fall back to global font size if font size is not valid, it will be set to -1 for detected blocks
                         blk.font_size = gf.font_size
-                    elif blk._detected_font_size > 0 and not pcfg.module.enable_detect:
+                    elif blk._detected_font_size > 0 and not enable_detect:
                         blk.font_size = blk._detected_font_size
                     if override_fnt_stroke:
                         blk.stroke_width = gf.stroke_width
-                    elif pcfg.module.enable_ocr:
+                    elif enable_ocr:
                         blk.recalulate_stroke_width()
                     if override_fnt_color:
                         blk.set_font_colors(fg_colors=gf.frgb)
@@ -1703,7 +1741,7 @@ class MainWindow(mainwindow_cls):
                         blk.set_font_colors(bg_colors=gf.srgb)
                     if override_alignment:
                         blk.alignment = gf.alignment
-                    elif pcfg.module.enable_detect and not blk.src_is_vertical:
+                    elif enable_detect and not blk.src_is_vertical:
                         blk.recalulate_alignment()
                     if override_effect:
                         blk.opacity = gf.opacity
@@ -1724,11 +1762,11 @@ class MainWindow(mainwindow_cls):
                     blk.bold = gf.bold
                     blk.underline = gf.underline
                     sw = blk.stroke_width
-                    if sw > 0 and pcfg.module.enable_ocr and pcfg.module.enable_detect and not override_fnt_size:
+                    if sw > 0 and enable_ocr and enable_detect and not override_fnt_size:
                         blk.font_size = blk.font_size / (1 + sw)
 
             self.st_manager.auto_textlayout_flag = pcfg.let_autolayout_flag and \
-                (pcfg.module.enable_detect or pcfg.module.enable_translate)
+                (enable_detect or enable_translate)
         
         if page_index != self.pageList.currentIndex().row():
             self.pageList.setCurrentRow(page_index)
@@ -1737,7 +1775,7 @@ class MainWindow(mainwindow_cls):
             self.canvas.updateCanvas()
             self.st_manager.updateSceneTextitems()
 
-        if not pcfg.module.enable_detect and pcfg.module.enable_translate:
+        if not enable_detect and enable_translate:
             for blkitem in self.st_manager.textblk_item_list:
                 blkitem.squeezeBoundingRect()
 
@@ -1806,89 +1844,117 @@ class MainWindow(mainwindow_cls):
         self.run_imgtrans()
     
     def run_imgtrans(self):
-        if not self.imgtrans_proj.is_all_pages_no_text and not pcfg.module.keep_exist_textlines:
-            # 創建自定義消息框，添加「繼續運行」選項
-            msgBox = QMessageBox(self)
-            msgBox.setIcon(QMessageBox.Question)
-            msgBox.setWindowTitle(self.tr('Confirmation'))
-            msgBox.setText(self.tr('"Run" will clear previous results, "Continue" will try to run from previous progress'))
-            
-            # 添加三個按鈕
-            restart_btn = msgBox.addButton(self.tr('Run'), QMessageBox.YesRole)
-            continue_btn = msgBox.addButton(self.tr('Continue'), QMessageBox.AcceptRole)
-            cancel_btn = msgBox.addButton(self.tr('Cancel'), QMessageBox.RejectRole)
-            
-            msgBox.setDefaultButton(continue_btn)
-            msgBox.exec_()
-            
-            clicked_button = msgBox.clickedButton()
-            if clicked_button == cancel_btn:
-                self._export_json_after_run = False
-                return  # 取消，不執行任何操作
-            elif clicked_button == continue_btn:
-                # 繼續運行：只處理沒有文本的頁面
-                self.on_run_imgtrans(continue_mode=True)
-                return
-            # 如果是 restart_btn，繼續執行下面的代碼（重新運行）
-        self.on_run_imgtrans()
+        dialog = RunPipelineDialog(
+            self,
+            project=self.imgtrans_proj,
+            translator_metadata=self.module_manager.translator_metadata(),
+        )
+        dialog.translate_source_changed.connect(self.on_trans_src_changed)
+        dialog.translate_target_changed.connect(self.on_trans_tgt_changed)
+        result = dialog.exec_()
+        if result == RunPipelineDialog.CONTINUE:
+            self._run_imgtrans_wo_textstyle_update = False
+            self.on_run_imgtrans(continue_mode=True)
+            return
+        if result == RunPipelineDialog.RENDER:
+            self._run_imgtrans_wo_textstyle_update = (
+                dialog.render_without_text_style_update.isChecked()
+            )
+            self.on_run_imgtrans(render_only=True)
+            return
+        if result != RunPipelineDialog.RUN:
+            self._export_json_after_run = False
+            return
+        self._run_imgtrans_wo_textstyle_update = False
+        self.on_run_imgtrans(pages_to_process=dialog.selected_pages())
 
-    def run_imgtrans_wo_textstyle_update(self):
-        self._run_imgtrans_wo_textstyle_update = True
-        self.run_imgtrans()
-
-    def on_run_imgtrans(self, continue_mode=False):
+    def on_run_imgtrans(
+        self,
+        continue_mode=False,
+        render_only=False,
+        pages_to_process=None,
+    ):
         self.backup_blkstyles.clear()
+        self._render_only = render_only
+        self._render_global_format = (
+            self.textPanel.formatpanel.global_format.deepcopy()
+            if render_only
+            else None
+        )
 
         if self.bottomBar.textblockChecker.isChecked():
             self.bottomBar.textblockChecker.click()
-        self.postprocess_mt_toggle = False
+        enable_detect = pcfg.module.enable_detect and not render_only
+        enable_ocr = pcfg.module.enable_ocr and not render_only
+        enable_translate = pcfg.module.enable_translate and not render_only
+        enable_inpaint = pcfg.module.enable_inpaint and not render_only
+        all_disabled = not (
+            enable_detect or enable_ocr or enable_translate or enable_inpaint
+        )
+        
+        all_page_names = list(self.imgtrans_proj.pages)
+        # Continue always scans the whole project; the dialog range applies only
+        # to a fresh run.
+        has_explicit_range = pages_to_process is not None and not continue_mode
+        requested_pages = (
+            all_page_names
+            if not has_explicit_range
+            else [
+                page
+                for page in pages_to_process
+                if page in self.imgtrans_proj.pages
+            ]
+        )
+        if has_explicit_range and not requested_pages and not render_only:
+            return
 
-        all_disabled = pcfg.module.all_stages_disabled()
-        
-        pages_to_process = []
-        
-        # 继续模式：先检查哪些页面需要处理
+        pipeline_pages = None
         if continue_mode:
-            for page_name in self.imgtrans_proj.pages:
-                if not self.imgtrans_proj.get_page_progress(page_name):
-                    pages_to_process.append(page_name)
-            if len(pages_to_process) == 0:
+            pipeline_pages = [
+                page_name
+                for page_name in requested_pages
+                if not self.imgtrans_proj.get_page_progress(page_name)
+            ]
+            if not pipeline_pages:
                 return
-        else:
-            for page_name in self.imgtrans_proj.pages:
-                self.imgtrans_proj.set_page_progress(page_name, 0)
-        
-        if pcfg.module.enable_detect:
-            for page in self.imgtrans_proj.pages:
-                if not pcfg.module.keep_exist_textlines:
-                    if not pages_to_process:
-                        # 没有指定pages_to_process，清空所有页面
-                        self.imgtrans_proj.pages[page].clear()
+            requested_pages = pipeline_pages
+        elif not render_only:
+            progress_mask = (
+                RunStatus.FIN_ALL
+                if enable_detect
+                else pcfg.module.finish_code
+            )
+            for page_name in requested_pages:
+                self.imgtrans_proj.clear_page_progress(
+                    page_name,
+                    progress_mask,
+                )
+            if has_explicit_range:
+                pipeline_pages = requested_pages
+
+        if enable_detect:
+            for page in requested_pages:
+                if not pcfg.module.keep_exist_textlines and not continue_mode:
+                    self.imgtrans_proj.pages[page].clear()
         else:
             self.st_manager.updateTextBlkList()
-            textblk: TextBlock = None
-            for page_name, blklist in self.imgtrans_proj.pages.items():
-                # 如果指定了pages_to_process，跳过不需要处理的页面
-                if pages_to_process and page_name not in pages_to_process:
-                    continue
-                    
+            for page_name in requested_pages:
+                blklist = self.imgtrans_proj.pages[page_name]
                 ffmt_list = []
                 self.backup_blkstyles.append(ffmt_list)
                 for textblk in blklist:
-                    if not pcfg.module.enable_detect:
-                        ffmt_list.append(textblk.fontformat.deepcopy())
-                    # 继续模式且没有指定pages_to_process时：跳过已有文本的文本块
-                    if continue_mode and not pages_to_process and textblk.text and len(textblk.text) > 0:
-                        continue
-                    if pcfg.module.enable_ocr:
+                    ffmt_list.append(textblk.fontformat.deepcopy())
+                    if enable_ocr:
                         textblk.text = []
                         textblk.set_font_colors((0, 0, 0), (0, 0, 0))
-                    if pcfg.module.enable_translate or (all_disabled and not self._run_imgtrans_wo_textstyle_update) or pcfg.module.enable_ocr:
+                    if enable_translate or (all_disabled and not self._run_imgtrans_wo_textstyle_update) or enable_ocr:
                         textblk.rich_text = ''
                     textblk.vertical = textblk.src_is_vertical
-        
-        # 如果有指定pages_to_process或者是continue_mode，则传递页面列表
-        self.module_manager.runImgtransPipeline(pages_to_process if (pages_to_process or continue_mode) else None)
+
+        self.module_manager.runImgtransPipeline(
+            pipeline_pages,
+            render_only=render_only,
+        )
 
     def on_transpanel_changed(self):
         self.canvas.editor_index = self.rightComicTransStackPanel.currentIndex()
@@ -1982,7 +2048,10 @@ class MainWindow(mainwindow_cls):
             if not osp.exists(selected_file):
                 return
 
-            all_matched, match_rst = self.imgtrans_proj.load_translation_from_txt(selected_file)
+            all_matched, match_rst = self.imgtrans_proj.load_translation_from_txt(
+                selected_file,
+                target_language=pcfg.module.translate_target,
+            )
             matched_pages = match_rst['matched_pages']
 
             if self.imgtrans_proj.current_img in matched_pages:
@@ -2199,31 +2268,24 @@ end tell"""
         except Exception:
             pass
 
-    def translate_preprocess(self, translations: List[str] = None, textblocks: List[TextBlock] = None, translator = None, source_text:list = []):
-        for i in range(len(source_text)):
-            source_text[i] = self.mtPreSubWidget.sub_text(source_text[i])
-
-    def translate_postprocess(self, translations: List[str] = None, textblocks: List[TextBlock] = None, translator = None):
-        if not self.postprocess_mt_toggle:
-            return
-        
-        for ii, tr in enumerate(translations):
-            translations[ii] = self.mtSubWidget.sub_text(tr)
-
     def on_copy_src(self):
         blks = self.canvas.selected_text_items()
         if len(blks) == 0:
             return
-        
-        if self.module_manager.translator is not None and self.module_manager.translator.name == 'ChatGPT':
-            src_list = [self.st_manager.pairwidget_list[blk.idx].e_source.toPlainText() for blk in blks]
-            src_txt = ''
-            for (prompt, num_src) in self.module_manager.translator._assemble_prompts(src_list, max_tokens=4294967295):
-                src_txt += prompt
-            src_txt = src_txt.strip()
-        else:
-            src_list = [self.st_manager.pairwidget_list[blk.idx].e_source.toPlainText().strip().replace('\n', ' ') for blk in blks]
-            src_txt = '\n'.join(src_list)
+
+        try:
+            if self.module_manager.translator is not None and hasattr(self.module_manager.translator, 'build_copy_prompt'):
+                src_list = [self.st_manager.pairwidget_list[blk.idx].e_source.toPlainText() for blk in blks]
+                src_txt = self.module_manager.translator.build_copy_prompt(src_list)
+            else:
+                src_list = [self.st_manager.pairwidget_list[blk.idx].e_source.toPlainText().strip().replace('\n', ' ') for blk in blks]
+                src_txt = '\n'.join(src_list)
+        except Exception as e:
+            create_error_dialog(
+                e,
+                self.tr('Failed to copy source text'),
+            )
+            return
 
         self.st_manager.app_clipborad.setText(src_txt, QClipboard.Mode.Clipboard)
 
@@ -2305,6 +2367,130 @@ end tell"""
         QMessageBox.StandardButton.NoButton
         dialog = MessageBox(**info_dict)
         dialog.show()   # exec_ will block main thread
+
+    def on_show_llm_key_dialog(self, profile_id: str, profile_name: str):
+        dialog_key = profile_id or profile_name
+        # QMessageBox.exec() runs a nested event loop, so queued RUN signals can re-enter here.
+        exception_type = f'LLMApiKeyRequired:{dialog_key}'
+        if exception_type in shared.showed_exception:
+            return
+        shared.showed_exception.add(exception_type)
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle(self.tr('API key required'))
+        msg.setText(self.tr('The selected LLM profile requires an API key.'))
+        msg.setInformativeText(
+            self.tr('Fill the API key before running this LLM task for: {profile_name}').format(profile_name=profile_name)
+        )
+        fill_btn = msg.addButton(self.tr('Fill API Key'), QMessageBox.AcceptRole)
+        msg.addButton(QMessageBox.StandardButton.Cancel)
+        try:
+            msg.exec()
+            if msg.clickedButton() == fill_btn:
+                self.focus_llm_profile(profile_id, expand_details=False)
+        finally:
+            shared.showed_exception.discard(exception_type)
+
+    def on_show_llm_model_dialog(self, profile_id: str, profile_name: str, target: str):
+        if isinstance(target, bool):
+            target = 'vision_model' if target else 'model'
+        target = target if target in {'model', 'vision_model', 'image_model'} else 'model'
+        dialog_key = profile_id or profile_name
+        # QMessageBox.exec() runs a nested event loop, so queued RUN signals can re-enter here.
+        exception_type = f'LLMModelRequired:{dialog_key}:{target}'
+        if exception_type in shared.showed_exception:
+            return
+        shared.showed_exception.add(exception_type)
+
+        title_by_target = {
+            'model': self.tr('Model required'),
+            'vision_model': self.tr('Vision model required'),
+            'image_model': self.tr('Image model required'),
+        }
+        field_by_target = {
+            'model': self.tr('model'),
+            'vision_model': self.tr('vision model'),
+            'image_model': self.tr('image model'),
+        }
+        title = title_by_target[target]
+        field_name = field_by_target[target]
+        display_profile_name = profile_name or profile_id or self.tr('LLM Profile')
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle(title)
+        msg.setText(
+            self.tr('The selected LLM profile requires a {field_name}.').format(field_name=field_name)
+        )
+        msg.setInformativeText(
+            self.tr('Fill the {field_name} before running this LLM task for: {profile_name}').format(
+                field_name=field_name,
+                profile_name=display_profile_name,
+            )
+        )
+        fill_btn = msg.addButton(self.tr('Fill Model'), QMessageBox.AcceptRole)
+        msg.addButton(QMessageBox.StandardButton.Cancel)
+        try:
+            msg.exec()
+            if msg.clickedButton() == fill_btn:
+                if target == 'vision_model':
+                    target_profile_id = profile_id or pcfg.module.ocr_llm_id
+                elif target == 'image_model':
+                    target_profile_id = profile_id or pcfg.module.inpaint_llm_id
+                else:
+                    target_profile_id = profile_id or pcfg.module.translator_llm_id
+                self.focus_llm_profile(
+                    target_profile_id,
+                    expand_details=False,
+                    target=target,
+                )
+        finally:
+            shared.showed_exception.discard(exception_type)
+
+    def on_show_llm_base_url_dialog(self, profile_id: str, profile_name: str, target: str):
+        target = target if target in {'base_url', 'image_base_url'} else 'base_url'
+        dialog_key = profile_id or profile_name
+        exception_type = f'LLMBaseURLRequired:{dialog_key}:{target}'
+        if exception_type in shared.showed_exception:
+            return
+        shared.showed_exception.add(exception_type)
+
+        title_by_target = {
+            'base_url': self.tr('Base URL required'),
+            'image_base_url': self.tr('Image base URL required'),
+        }
+        field_by_target = {
+            'base_url': self.tr('base URL'),
+            'image_base_url': self.tr('image base URL'),
+        }
+        title = title_by_target[target]
+        field_name = field_by_target[target]
+        display_profile_name = profile_name or profile_id or self.tr('LLM Profile')
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle(title)
+        msg.setText(
+            self.tr('The selected LLM profile requires this field: {field_name}.').format(field_name=field_name)
+        )
+        msg.setInformativeText(
+            self.tr('Fill the {field_name} before running this LLM task for: {profile_name}').format(
+                field_name=field_name,
+                profile_name=display_profile_name,
+            )
+        )
+        fill_btn = msg.addButton(self.tr('Fill URL'), QMessageBox.AcceptRole)
+        msg.addButton(QMessageBox.StandardButton.Cancel)
+        try:
+            msg.exec()
+            if msg.clickedButton() == fill_btn:
+                target_profile_id = profile_id or pcfg.module.inpaint_llm_id
+                self.focus_llm_profile(
+                    target_profile_id,
+                    expand_details=True,
+                    target=target,
+                )
+        finally:
+            shared.showed_exception.discard(exception_type)
 
     def setupRegisterWidget(self):
         self.titleBar.viewMenu.addSeparator()

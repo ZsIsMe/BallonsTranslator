@@ -1,15 +1,17 @@
-> [!IMPORTANT]  
-> **Si vous partagez publiquement le résultat traduit et qu'aucun traducteur humain expérimenté n'a participé à la traduction ou à la relecture, veuillez indiquer clairement qu'il s'agit d'une traduction automatique.**
+<p align="center">
+  <img
+    width="256"
+    alt="Spinning fox animation"
+    src="https://github.com/user-attachments/assets/fe44e9a6-c7da-4bc5-8421-87fd6c38a0ba"
+  />
+</p>
 
-# BallonTranslator
-[简体中文](/README.md) | [English](/README_EN.md) | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md)
+<h1 align="center">BallonsTranslator</h1>
 
-BallonTranslator est un autre outil assisté par ordinateur, basé sur l'apprentissage profond (deep learning), permettant de traduire des comics/mangas.
+<p align="center">BallonTranslator est un autre outil assisté par ordinateur, basé sur l'apprentissage profond (deep learning), permettant de traduire des comics/mangas.</p>
 
-<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
-
-<p align=center>
-aperçu
+<p align="center">
+  <a href="/README.md">简体中文</a> | <a href="/README_EN.md">English</a> | <a href="/doc/README_RU.md">Русский</a> | <a href="/doc/README_JA.md">日本語</a> | <a href="/doc/README_ES.md">Español</a> | Français | <a href="/doc/README_PT-BR.md">pt-BR</a> | <a href="/doc/README_KO.md">한국어</a> | <a href="/doc/README_ID.md">Indonesia</a> | <a href="/doc/README_VI.md">Tiếng Việt</a>
 </p>
 
 Prend en charge le formatage riche du texte et les préréglages de style. Les textes traduits peuvent être édités interactivement.
@@ -19,6 +21,9 @@ Prend en charge rechercher & remplacer
 Prend en charge l’export/import vers/depuis des documents Word
 
 # Fonctionnalités
+> [!IMPORTANT]
+> **Si vous partagez publiquement le résultat traduit et qu'aucun traducteur humain expérimenté n'a participé à la traduction ou à la relecture, veuillez indiquer clairement qu'il s'agit d'une traduction automatique.**
+
 * Traduction entièrement automatisée
   - Prend en charge la détection, la reconnaissance, la suppression et la traduction automatiques du texte. Les performances globales dépendent de ces modules.
   - La composition typographique est basée sur l'estimation du formatage du texte original.
@@ -33,6 +38,50 @@ Prend en charge l’export/import vers/depuis des documents Word
   - Prend en charge le formatage riche du texte et les [préréglages de style](https://github.com/dmMaze/BallonsTranslator/pull/311). Les textes traduits peuvent être édités interactivement.
   - Prend en charge rechercher & remplacer
   - Prend en charge l’export/import vers/depuis des documents Word
+
+* <details>
+  <summary><i>Traduction LLM sensible au contexte</i></summary>
+
+  **Historique des traductions**
+
+  - Réglez **LLM Context** sur **+history** pour montrer à `LLMTranslator` des exemples tirés des pages antérieures terminées. Cela peut améliorer la cohérence des noms, de la terminologie et du ton. Les reprises et plages sélectionnées peuvent aussi utiliser les pages antérieures admissibles.
+  - **Token budget** contrôle la quantité de texte traduit antérieur incluse, en privilégiant les pages récentes. La page actuelle, les instructions, le glossaire et la réponse générée nécessitent de l’espace supplémentaire. La valeur par défaut est `4096`.
+  - Un budget plus élevé fournit davantage de contexte narratif et supprime moins souvent les anciennes pages, mais envoie plus de texte et peut être plus lent. Les modèles locaux peuvent aussi nécessiter beaucoup plus de RAM/VRAM. La valeur par défaut `4096` est volontairement prudente ; les fournisseurs courants dotés d’une grande fenêtre de contexte, comme DeepSeek, acceptent souvent une limite supérieure. Environ 70 % de la limite de contexte du modèle constitue une limite supérieure raisonnable (`90000` pour 128K).
+  - Le budget de l’historique influe aussi sur le cache de prompts. Tant que l’historique augmente sans dépasser ce budget, les requêtes consécutives gardent le même début, que des fournisseurs comme OpenAI et DeepSeek peuvent réutiliser à un tarif réduit par jeton d’entrée et parfois avec moins de latence. Lorsque le budget impose de supprimer d’anciennes pages, ce début change et la réutilisation du cache est réinitialisée. Un budget plus élevé réduit ces réinitialisations, mais envoie davantage d’historique et ne garantit donc pas un coût total inférieur.
+
+  Le tableau ci-dessous donne une estimation approximative pour des pages de manga avec DeepSeek, où les jetons d’entrée mis en cache coûtent 10 % du prix des jetons d’entrée ordinaires. Les résultats réels varient selon le projet, le modèle et le fournisseur.
+
+  | Token budget | Historique conservé estimé (pages) | Coût total estimé par rapport à l’absence d’historique |
+  |---:|---:|---:|
+  | `2048` | 3–4 | 1.65× |
+  | `4096` | 6–9 | 1.79× |
+  | `8192` | 12–19 | 2.10× |
+  | `16384` | 23–38 | 2.66× |
+
+  **Glossaires réutilisables**
+
+  - Définissez **Glossary File** dans la boîte de dialogue d’exécution sur un fichier UTF-8 `.json`, `.txt` ou `.tsv`. Ce fichier est en lecture seule et peut être réutilisé dans plusieurs projets.
+  - **Matching** envoie uniquement les entrées dont les termes sources figurent sur la page concernée. **All** envoie toutes les entrées et peut consommer beaucoup plus de jetons.
+  - Les formats pris en charge comprennent :
+
+    ```text
+    # Texte au format Sakura
+    source->traduction # note facultative
+
+    # Texte séparé par des tabulations
+    source<TAB>traduction<TAB>note facultative
+    ```
+
+    ```json
+    [
+      {"src": "source", "dst": "traduction", "info": "note facultative"}
+    ]
+    ```
+
+  - La correspondance est littérale et insensible à la casse. Les entrées conflictuelles, les fichiers mal formés, les formats non pris en charge et les fichiers manquants interrompent la traduction avant l’envoi d’une requête au LLM.
+  - Le contexte des pages antérieures et l’injection du glossaire ne concernent que `LLMTranslator` ; les autres traducteurs ignorent ces paramètres.
+
+  </details>
 
 # Installation
 
@@ -66,9 +115,7 @@ curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts
 
 Si `curl` n'est pas disponible, téléchargez plutôt le script avec `wget -O ...`. L'application démarre automatiquement après l'installation ; ensuite, utilisez `cd BallonsTranslator && ./launch.sh` pour la relancer.
 
-L'application vérifie les dépendances principales au démarrage. Lorsque vous sélectionnez un module qui nécessite des bibliothèques supplémentaires, l'application vous proposera d'installer les dépendances optionnelles manquantes (vous pouvez aussi activer l'installation automatique dans les paramètres). Si le téléchargement des modèles échoue, vérifiez votre réseau/proxy, ou téléchargez les modèles requis depuis [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) ou [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) et placez-les manuellement dans le dossier `data`.
-
-Le logiciel dispose d'une vérification intégrée des mises à jour ; consultez le panneau de configuration -> Démarrage et mise à jour pour plus de détails.
+L'application vérifie les dépendances principales au démarrage. Lorsque vous sélectionnez un module qui nécessite des bibliothèques supplémentaires, l'application vous proposera d'installer les dépendances optionnelles manquantes (vous pouvez aussi activer l'installation automatique dans les paramètres).
 
 # Utilisation
 

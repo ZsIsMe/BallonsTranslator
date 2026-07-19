@@ -1,19 +1,23 @@
+<p align="center">
+  <img
+    width="256"
+    alt="Spinning fox animation"
+    src="https://github.com/user-attachments/assets/fe44e9a6-c7da-4bc5-8421-87fd6c38a0ba"
+  />
+</p>
+
+<h1 align="center">BallonsTranslator</h1>
+
+<p align="center">BallonTranslator es otra herramienta asistida por ordenador, basada en el aprendizaje profundo, para traducir cómics/manga.</p>
+
+<p align="center">
+  <a href="/README.md">简体中文</a> | <a href="/README_EN.md">English</a> | <a href="/doc/README_RU.md">Русский</a> | <a href="/doc/README_JA.md">日本語</a> | Español | <a href="/doc/README_FR.md">Français</a> | <a href="/doc/README_PT-BR.md">pt-BR</a> | <a href="/doc/README_KO.md">한국어</a> | <a href="/doc/README_ID.md">Indonesia</a> | <a href="/doc/README_VI.md">Tiếng Việt</a>
+</p>
+
+## Recursos
 > [!IMPORTANT]
 > **Si planeas compartir públicamente los resultados de traducción automática generados con esta herramienta, y no han sido revisados o traducidos completamente por un traductor con experiencia, por favor indícalo claramente como traducción automática en un lugar visible.**
 
-## BallonTranslator
-
-[简体中文](/README.md) | [English](/README_EN.md) | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md) 
-
-BallonTranslator es otra herramienta asistida por ordenador, basada en el aprendizaje profundo, para traducir cómics/manga.
-
-<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
-
-<p align=center>
-  <strong>Vista previa</strong>
-</p>
-  
-## Recursos
 * **Traducción totalmente automática:** 
   - Detecta, reconoce, elimina y traduce textos automáticamente. El rendimiento global depende de estos módulos.
   - La maquetación se basa en el formato estimado del texto original.
@@ -28,6 +32,50 @@ BallonTranslator es otra herramienta asistida por ordenador, basada en el aprend
   - Admite formato de texto y [preajustes de estilo de texto](https://github.com/dmMaze/BallonsTranslator/pull/311). Los textos traducidos pueden editarse interactivamente.
   - Buscar y reemplazar.
   - Exportación/importación a/desde documentos Word.
+
+* <details>
+  <summary><i>Traducción con LLM sensible al contexto</i></summary>
+
+  **Historial de traducciones**
+
+  - Establezca **LLM Context** en **+history** para que `LLMTranslator` vea ejemplos de páginas anteriores completadas. Esto puede mantener más coherentes los nombres, la terminología y el tono. Las ejecuciones continuadas o por intervalo también pueden usar páginas anteriores aptas.
+  - **Token budget** controla cuánto texto traducido anterior se incluye, dando prioridad a las páginas más recientes. La página actual, las instrucciones, el glosario y la respuesta generada necesitan espacio adicional. El valor predeterminado es `4096`.
+  - Un presupuesto mayor aporta más contexto de la historia y descarta páginas antiguas con menos frecuencia, pero envía más texto y puede tardar más. Los modelos locales también pueden necesitar mucha más RAM/VRAM. El valor predeterminado `4096` es deliberadamente conservador; los proveedores habituales con ventanas de contexto grandes, como DeepSeek, suelen permitir un límite mayor. Cerca del 70 % del límite de contexto del modelo es un límite superior razonable (`90000` para 128K).
+  - El presupuesto del historial también afecta a la caché de prompts. Mientras el historial crece dentro del presupuesto, las solicitudes consecutivas conservan el mismo inicio, que proveedores como OpenAI y DeepSeek pueden reutilizar con un precio reducido por token de entrada y, a veces, menor latencia. Cuando el presupuesto obliga a descartar páginas antiguas, ese inicio cambia y la reutilización de caché se reinicia. Un presupuesto mayor reduce los reinicios, pero envía más historial, por lo que no garantiza un coste total menor.
+
+  La tabla siguiente es una estimación aproximada para páginas de manga usando DeepSeek, donde los tokens de entrada en caché cuestan el 10 % de los tokens de entrada normales. Los resultados reales varían según el proyecto, el modelo y el proveedor.
+
+  | Token budget | Historial estimado conservado (páginas) | Coste total estimado frente a no usar historial |
+  |---:|---:|---:|
+  | `2048` | 3–4 | 1.65× |
+  | `4096` | 6–9 | 1.79× |
+  | `8192` | 12–19 | 2.10× |
+  | `16384` | 23–38 | 2.66× |
+
+  **Glosarios reutilizables**
+
+  - Configure **Glossary File** en el cuadro de diálogo de ejecución con un archivo UTF-8 `.json`, `.txt` o `.tsv`. El archivo es de solo lectura y puede reutilizarse en distintos proyectos.
+  - **Matching** envía únicamente las entradas cuyos términos de origen aparecen en la página correspondiente. **All** envía todas las entradas y puede consumir muchos más tokens.
+  - Los formatos admitidos incluyen:
+
+    ```text
+    # Texto con formato Sakura
+    origen->traducción # nota opcional
+
+    # Texto separado por tabulaciones
+    origen<TAB>traducción<TAB>nota opcional
+    ```
+
+    ```json
+    [
+      {"src": "origen", "dst": "traducción", "info": "nota opcional"}
+    ]
+    ```
+
+  - La coincidencia es literal y no distingue entre mayúsculas y minúsculas. Las entradas en conflicto, los archivos mal formados, los formatos no admitidos y los archivos ausentes detienen la traducción antes de enviar una solicitud al LLM.
+  - El contexto de páginas anteriores y la inserción del glosario solo afectan a `LLMTranslator`; los demás traductores ignoran estos ajustes.
+
+  </details>
 
 ## Instalación
 
@@ -59,9 +107,7 @@ curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts
 
 Si `curl` no está disponible, descargue el script con `wget -O ...` en su lugar. La aplicación se inicia automáticamente después de la instalación; más tarde, use `cd BallonsTranslator && ./launch.sh` para iniciarla de nuevo.
 
-La aplicación comprueba las dependencias principales al iniciar. Cuando seleccione un módulo que necesite bibliotecas adicionales, la aplicación le pedirá instalar las dependencias opcionales que falten (también puede activar la instalación automática en los ajustes). Si falla la descarga de modelos, revise la red/proxy, o descargue los modelos necesarios desde [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) o [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) y colóquelos manualmente en el directorio `data`.
-
-El software incluye comprobación de actualizaciones; consulte Panel de configuración -> Inicio y actualización para más detalles.
+La aplicación comprueba las dependencias principales al iniciar. Cuando seleccione un módulo que necesite bibliotecas adicionales, la aplicación le pedirá instalar las dependencias opcionales que falten (también puede activar la instalación automática en los ajustes).
 
 # Utilización
 

@@ -16,6 +16,57 @@ FONT_EXTS = {'.ttf','.otf','.ttc','.pfb'}
 
 IS_WIN7 = "Windows-7" in platform()
 
+def disable_bundled_windows_user_site() -> list:
+    """Remove per-user packages from the bundled Windows Python runtime.
+
+    >>> isinstance(disable_bundled_windows_user_site(), list)
+    True
+    """
+
+    if sys.platform != 'win32':
+        return []
+
+    executable_dir = Path(sys.executable).parent
+    if executable_dir.name.lower() != 'ballontrans_pylibs_win':
+        return []
+
+    os.environ['PYTHONNOUSERSITE'] = '1'
+    try:
+        import site
+    except Exception:
+        return []
+
+    try:
+        user_site = site.getusersitepackages()
+    except Exception:
+        user_site = getattr(site, 'USER_SITE', None)
+    if not user_site:
+        return []
+
+    user_site_paths = user_site if isinstance(user_site, (list, tuple)) else [user_site]
+    blocked_paths = {
+        osp.normcase(osp.abspath(path))
+        for path in user_site_paths
+        if path
+    }
+    removed = []
+    remaining = []
+    for path in sys.path:
+        if path and osp.normcase(osp.abspath(path)) in blocked_paths:
+            removed.append(path)
+        else:
+            remaining.append(path)
+
+    if removed:
+        sys.path[:] = remaining
+
+    # Keep later imports and subprocess restarts from re-enabling AppData packages.
+    site.ENABLE_USER_SITE = False
+    return removed
+
+
+disable_bundled_windows_user_site()
+
 import ballontranslator.utils.shared as shared # Earlier import of shared to use default for config_path argument
 from ballontranslator.utils.version import APP_VERSION
 
@@ -36,7 +87,20 @@ parser.add_argument("--ldpi", default=None, type=float, help='logical dots perin
 parser.add_argument("--export-translation-txt", action='store_true', help='save translation to txt file once RUN completed')
 parser.add_argument("--export-source-txt", action='store_true', help='save source to txt file once RUN completed')
 parser.add_argument("--export-json-labelplus", action='store_true', help='save detection result to text_rect.json once RUN completed')
-parser.add_argument("--config_path", default=shared.CONFIG_PATH, help='Config file to use for translation') # Named config_path to avoid conflict with existing name config
+parser.add_argument(
+    "--show-release-info",
+    "--show_release_info",
+    dest="show_release_info",
+    action='store_true',
+    help='show cached GitHub release information on startup without making an API request',
+)
+parser.add_argument(
+    "--config",
+    "--config_path",
+    dest="config_path",
+    default=shared.CONFIG_PATH,
+    help='Config file to use for translation',
+)
 if "--headless_continuous" in sys.argv[1:]:
     parser.error("--headless_continuous has been renamed to --headless")
 args, _ = parser.parse_known_args()
@@ -179,7 +243,7 @@ def main():
     from ballontranslator.utils.io_utils import find_all_files_recursive
     from ballontranslator.utils import config as program_config
 
-    from qtpy.QtCore import QTranslator, QLocale, Qt
+    from qtpy.QtCore import QTranslator, QLocale, Qt, QTimer
     shared.args = args
     shared.DEFAULT_DISPLAY_LANG = QLocale.system().name().replace('en_CN', 'zh_CN')
     shared.HEADLESS = args.headless
@@ -211,6 +275,13 @@ def main():
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True) #enable high dpi scaling
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True) #use high dpi icons
         QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+
+    if sys.platform == 'win32':
+        application_attribute = getattr(Qt, 'ApplicationAttribute', Qt)
+        QApplication.setAttribute(
+            application_attribute.AA_DontCreateNativeWidgetSiblings,
+            True,
+        )
 
     os.chdir(shared.PROGRAM_PATH)
 
@@ -278,6 +349,9 @@ def main():
     from ballontranslator.ui.mainwindow import MainWindow
     from ballontranslator.utils.message import create_info_dialog
     ballontrans = MainWindow(app, config, open_dir=args.proj_dir, **vars(args))
+    delete_on_close = getattr(Qt, 'WidgetAttribute', Qt).WA_DeleteOnClose
+    # Destroy the Qt window tree before SIP performs interpreter-exit cleanup.
+    ballontrans.setAttribute(delete_on_close, True)
     global BT
     BT = ballontrans
     BT.restart_signal.connect(restart)
@@ -289,13 +363,20 @@ def main():
 
         ballontrans.setWindowIcon(QIcon(shared.ICON_PATH))
         ballontrans.show()
-        ballontrans.resetStyleSheet()
+        if shared.ON_WINDOWS:
+            from ballontranslator.ui.framelesswindow import FramelessMoveResize
+            # SC_MAXIMIZE animates only after the normal window is visible.
+            QTimer.singleShot(
+                0,
+                lambda: FramelessMoveResize.maximize(ballontrans),
+            )
     if updated_mirrors:
         create_info_dialog(QApplication.translate(
             'NetworkMirrors',
             'Network mirrors were selected automatically for better access to dependencies and model downloads.',
         ))
-    sys.exit(app.exec())
+    # Let this frame release Qt objects before SIP's interpreter-exit cleanup.
+    return app.exec()
 
 
 if __name__ == '__main__':

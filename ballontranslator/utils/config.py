@@ -8,6 +8,8 @@ from .fontformat import FontFormat
 from .structures import List, Dict, Config, field, nested_dataclass
 from .logger import logger as LOGGER
 from .io_utils import json_dump_nested_obj, np, serialize_np
+from .llm_profiles import default_profiles, load_profiles, migrate_module_llm_profiles, profile_by_id, profile_to_dict, LLMProfile
+from .secret_store import SecretStore
 
 class RunStatus:
     FIN_DET = 1
@@ -15,6 +17,42 @@ class RunStatus:
     FIN_INPAINT = 4
     FIN_TRANSLATE = 8
     FIN_ALL = 15
+
+
+class TranslateContext:
+    """Canonical translation grouping values stored in module config.
+
+    >>> TranslateContext.Page
+    'page'
+    """
+
+    TextBlock = 'textblock'
+    Page = 'page'
+    Valid = (TextBlock, Page)
+
+
+class LLMTranslateContext:
+    """Canonical LLM translation-context modes stored in module config.
+
+    >>> LLMTranslateContext.HISTORY
+    'history'
+    """
+
+    PAGE = 'page'
+    HISTORY = 'history'
+    Valid = (PAGE, HISTORY)
+
+
+class LLMGlossaryMode:
+    """Canonical glossary selection modes stored in module config.
+
+    >>> LLMGlossaryMode.Matching
+    'matching'
+    """
+
+    Matching = 'matching'
+    All = 'all'
+    Valid = (Matching, All)
 
 
 @nested_dataclass
@@ -34,10 +72,18 @@ class ModuleConfig(Config):
     textdetector_params: Dict = field(default_factory=lambda: dict())
     ocr_params: Dict = field(default_factory=lambda: dict())
     translator_params: Dict = field(default_factory=lambda: dict())
+    llm_profiles: List[LLMProfile] = field(default_factory=lambda: list())
+    translator_llm_id: str = ''
+    ocr_llm_id: str = ''
+    inpaint_llm_id: str = ''
     inpainter_params: Dict = field(default_factory=lambda: dict())
     translate_source: str = '日本語'
     translate_target: str = '简体中文'
-    translate_by_textblock: bool = False
+    translate_context: str = TranslateContext.Page
+    llm_translate_context: str = LLMTranslateContext.PAGE
+    llm_prior_context_token_budget: int = 4096
+    llm_glossary_path: str = ''
+    llm_glossary_mode: str = LLMGlossaryMode.Matching
 
     check_need_inpaint: bool = True
     empty_runcache: bool = False
@@ -71,9 +117,23 @@ class ModuleConfig(Config):
         params.inpainter_params = self.get_params('inpainter', for_saving=True)
         params.textdetector_params = self.get_params('textdetector', for_saving=True)
         params.translator_params = self.get_params('translator', for_saving=True)
+        params.llm_profiles = self.get_saving_llm_profiles()
         if to_dict:
             return params.__dict__
         return params
+
+    def get_saving_llm_profiles(self):
+        profiles = []
+        secret_store = SecretStore()
+        for profile in self.llm_profiles:
+            saving_profile = profile_to_dict(profile)
+            if 'api_key' in saving_profile:
+                saving_profile['api_key'] = secret_store.prepare_for_save(
+                    saving_profile.get('id', ''),
+                    saving_profile.get('api_key', ''),
+                )
+            profiles.append(saving_profile)
+        return profiles
     
     def stage_enabled(self, idx: int):
         if idx == 0:
@@ -86,11 +146,48 @@ class ModuleConfig(Config):
             return self.enable_inpaint
         else:
             raise Exception(f'not supported stage idx: {idx}')
+
+    def set_stage_enabled(self, idx: int, enabled: bool):
+        stage_attrs = (
+            'enable_detect',
+            'enable_ocr',
+            'enable_translate',
+            'enable_inpaint',
+        )
+        if idx < 0 or idx >= len(stage_attrs):
+            raise Exception(f'not supported stage idx: {idx}')
+        stage_attr = stage_attrs[idx]
+        setattr(self, stage_attr, bool(enabled))
+        self.update_finish_code()
         
     def all_stages_disabled(self):
         return (self.enable_detect or self.enable_ocr or self.enable_translate or self.enable_inpaint) is False
 
     def __post_init__(self):
+        if self.translate_context not in TranslateContext.Valid:
+            self.translate_context = TranslateContext.Page
+        if self.llm_translate_context not in LLMTranslateContext.Valid:
+            self.llm_translate_context = LLMTranslateContext.PAGE
+        if not isinstance(self.llm_glossary_path, str):
+            self.llm_glossary_path = ''
+        if self.llm_glossary_mode not in LLMGlossaryMode.Valid:
+            self.llm_glossary_mode = LLMGlossaryMode.Matching
+        if (
+            not isinstance(self.llm_prior_context_token_budget, int)
+            or isinstance(self.llm_prior_context_token_budget, bool)
+            or self.llm_prior_context_token_budget <= 0
+        ):
+            self.llm_prior_context_token_budget = 4096
+        if not self.llm_profiles:
+            self.llm_profiles = default_profiles()
+        else:
+            self.llm_profiles = load_profiles(self.llm_profiles)
+        if (not self.translator_llm_id or not profile_by_id(self.llm_profiles, self.translator_llm_id)) and self.llm_profiles:
+            self.translator_llm_id = self.llm_profiles[0].id
+        if (not self.ocr_llm_id or not profile_by_id(self.llm_profiles, self.ocr_llm_id)) and self.llm_profiles:
+            self.ocr_llm_id = self.llm_profiles[0].id
+        if (not self.inpaint_llm_id or not profile_by_id(self.llm_profiles, self.inpaint_llm_id)) and self.llm_profiles:
+            self.inpaint_llm_id = self.llm_profiles[0].id
         self.update_finish_code()
 
     def update_finish_code(self):
@@ -110,7 +207,7 @@ class DrawPanelConfig(Config):
     current_tool: int = 0
     rectool_auto: bool = False
     rectool_method: int = 0
-    recttool_dilate_ksize: int = 0
+    recttool_dilate_ksize: int = 2
 
 @nested_dataclass
 class PackageManagerConfig(Config):
@@ -140,6 +237,17 @@ class ProgramConfig(Config):
     original_transparency: float = 0.
     open_recent_on_startup: bool = True 
     check_update_on_startup: bool = True
+    spellcheck_enabled: bool = False
+    spellcheck_external_dict_path: str = ""
+    spellcheck_repo_dicts: str = ""
+    spellcheck_distance: int = 1
+    spellcheck_on_source_enabled: bool = False
+    show_textdetector_tool: bool = True
+    show_ocr_tool: bool = True
+    show_translator_tool: bool = True
+    show_inpainter_tool: bool = True
+    run_pipeline_mode: str = 'pipeline'
+    render_without_text_style_update: bool = False
 
     let_fntsize_flag: int = 0
     let_fntstroke_flag: int = 0
@@ -189,33 +297,23 @@ class ProgramConfig(Config):
         with open(cfg_path, 'r', encoding='utf8') as f:
             config_dict = json.loads(f.read())
 
-        # for backward compatibility
-        if 'dl' in config_dict:
-            dl = config_dict.pop('dl')
-            if not 'module' in config_dict:
-                if 'textdetector_setup_params' in dl:
-                    textdetector_params = dl.pop('textdetector_setup_params')
-                    dl['textdetector_params'] = textdetector_params
-                if 'inpainter_setup_params' in dl:
-                    inpainter_params = dl.pop('inpainter_setup_params')
-                    dl['inpainter_params'] = inpainter_params
-                if 'ocr_setup_params' in dl:
-                    ocr_params = dl.pop('ocr_setup_params')
-                    dl['ocr_params'] = ocr_params
-                if 'translator_setup_params' in dl:
-                    translator_params = dl.pop('translator_setup_params')
-                    dl['translator_params'] = translator_params
-                config_dict['module'] = dl
-
         if 'module' in config_dict:
             module_cfg = config_dict['module']
-            trans_params = module_cfg['translator_params']
-            repl_pairs = {'baidu': 'Baidu', 'caiyun': 'Caiyun', 'chatgpt': 'ChatGPT', 'Deepl': 'DeepL', 'papago': 'Papago'}
-            for k, i in repl_pairs.items():
-                if k in trans_params:
-                    trans_params[i] = trans_params.pop(k)
-            if module_cfg['translator'] in repl_pairs:
-                module_cfg['translator'] = repl_pairs[module_cfg['translator']]
+            if 'translate_context' not in module_cfg and 'translate_by_textblock' in module_cfg:
+                module_cfg['translate_context'] = (
+                    TranslateContext.TextBlock
+                    if module_cfg['translate_by_textblock']
+                    else TranslateContext.Page
+                )
+            module_cfg.pop('translate_by_textblock', None)
+            if module_cfg.get('textdetector') == 'rtdetr_v2':
+                module_cfg['textdetector'] = 'ctbd'
+            if 'textdetector_params' in module_cfg:
+                params = module_cfg['textdetector_params']
+                if 'rtdetr_v2' in params:
+                    params['ctbd'] = params.pop('rtdetr_v2')
+            # LLM translator keys must be consumed before module-param patching drops unknown keys.
+            migrate_module_llm_profiles(module_cfg)
 
         return ProgramConfig(**config_dict)
     
@@ -252,9 +350,11 @@ def load_textstyle_from(p: str, raise_exception = False):
     text_styles.extend(styles_loaded)
     pcfg.text_styles_path = p
 
-def load_config(config_path: str = shared.CONFIG_PATH):
+def load_config(config_path: str = None):
     global config_created_on_load
     config_created_on_load = False
+    if config_path is None:
+        config_path = shared.CONFIG_PATH
     if config_path != shared.CONFIG_PATH:
         shared.CONFIG_PATH = config_path
         LOGGER.info(f'Using specified config file at {shared.CONFIG_PATH}')
@@ -301,6 +401,9 @@ def json_dump_program_config(obj, **kwargs):
 def save_config():
     global pcfg
     try:
+        config_dir = osp.dirname(shared.CONFIG_PATH)
+        if config_dir and not osp.exists(config_dir):
+            os.makedirs(config_dir)
         tmp_save_tgt = shared.CONFIG_PATH + '.tmp'
         with open(tmp_save_tgt, 'w', encoding='utf8') as f:
             f.write(json_dump_program_config(pcfg))
@@ -310,7 +413,7 @@ def save_config():
         return False
     
     os.replace(tmp_save_tgt, shared.CONFIG_PATH)
-    LOGGER.info('Config saved')
+    LOGGER.debug('Config saved')
     return True
 
 def save_text_styles(raise_exception = False):

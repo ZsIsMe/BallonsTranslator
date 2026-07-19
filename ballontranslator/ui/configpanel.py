@@ -1,10 +1,17 @@
+import os
 from typing import List, Union, Tuple
 
-from qtpy.QtWidgets import QApplication, QPushButton, QLayout, QGridLayout, QHBoxLayout, QVBoxLayout, QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox, QSplitter, QScrollArea, QLineEdit, QDialog, QStackedWidget, QMessageBox
-from qtpy.QtCore import Qt, Signal, QSize, QEvent, QItemSelection
+from qtpy.QtWidgets import (
+    QApplication, QPushButton, QLayout, QGridLayout, QHBoxLayout, QVBoxLayout,
+    QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox,
+    QSplitter, QScrollArea, QLineEdit, QStackedWidget, QMessageBox,
+    QListWidget, QSpinBox, QProgressDialog, QFileDialog, QListWidgetItem,
+    QFrame,
+)
+from qtpy.QtCore import Qt, Signal, QSize, QEvent, QItemSelection, QTimer
 from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent
 
-from .custom_widget import ConfigComboBox, Widget
+from .custom_widget import ConfigComboBox, ScrollBar, Widget
 from ballontranslator.utils.config import pcfg
 from ballontranslator.utils.version import APP_VERSION
 from ballontranslator.utils.network_mirrors import (
@@ -14,14 +21,37 @@ from ballontranslator.utils.network_mirrors import (
     mirror_from_display,
     mirror_to_display,
 )
-from ballontranslator.utils.shared import CONFIG_FONTSIZE_CONTENT, CONFIG_FONTSIZE_TABLE, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN
+from ballontranslator.utils.shared import (
+    CONFIG_COMBOBOX_LONG,
+    CONFIG_COMBOBOX_MIDEAN,
+    CONFIG_COMBOBOX_SHORT,
+    CONFIG_CONTENT_MARGIN,
+    CONFIG_CONTENT_MARGINS,
+    CONFIG_CONTENT_ROW_SPACING,
+    CONFIG_FONTSIZE_CONTENT,
+    CONFIG_FONTSIZE_TABLE,
+    ON_MACOS,
+    ON_WINDOWS,
+    PROGRAM_PATH,
+    TITLEBAR_HEIGHT,
+)
+from ballontranslator.utils.logger import logger as LOGGER
 from .module_parse_widgets import InpaintConfigPanel, TextDetectConfigPanel, TranslatorConfigPanel, OCRConfigPanel
+from .llm_profile_widgets import LLMProfilesWidget
+from .framelesswindow import FramelessMoveResize, FramelessWindow
+from ballontranslator.ui.spellcheck import DICTIONARY_URLS, SpellCheckManager, DictionaryManagerDialog, DictDownloadThread
+
 
 LAYOUT_SET_MINIMUM_SIZE = getattr(getattr(QLayout, 'SizeConstraint', QLayout), 'SetMinimumSize')
 PUSHBTN_FIXED_HEIGHT = 32
 SECTION_ALIASES = {
     'startup': 'application',
     'save': 'application',
+    'modules': 'pipeline',
+    'detector': 'pipeline',
+    'ocr': 'pipeline',
+    'inpainter': 'pipeline',
+    'translator': 'pipeline',
 }
 PRESERVE_ACTIVE_WIDGET_CLASS_NAMES = {
     'FrameLessMessageBox',
@@ -103,61 +133,98 @@ class ConfigTextLabel(QLabel):
 
 
 class ConfigSubBlock(Widget):
-    def __init__(self, widget: Union[QWidget, QLayout], name: str = None, discription: str = None, 
-    vertical_layout=True, insert_stretch: bool = False, content_margins = (0, 0, 0, 0), fnt_size=None) -> None:
+    def __init__(self, widget: Union[QWidget, QLayout], name: str = None, discription: str = None,
+    vertical_layout=True, insert_stretch: bool = False, content_margins = (0, 0, 0, 0), fnt_size=None,
+    tooltip: str = None) -> None:
         super().__init__()
         if vertical_layout:
             layout = QVBoxLayout(self)
         else:
             layout = QHBoxLayout(self)
+        layout.setContentsMargins(*content_margins)
 
+        tooltip = tooltip or discription
+        self.name_label = None
+        self.description_label = None
+        if tooltip is None and isinstance(widget, QWidget):
+            tooltip = widget.toolTip()
         if fnt_size is None:
             fnt_size = CONFIG_FONTSIZE_CONTENT
             if discription is not None:
                 fnt_size = CONFIG_FONTSIZE_CONTENT-2
         if name is not None:
             textlabel = ConfigTextLabel(name, fnt_size, QFont.Weight.Normal)
+            self.name_label = textlabel
+            if tooltip:
+                textlabel.setToolTip(tooltip)
             layout.addWidget(textlabel)
         if discription is not None:
-            layout.addWidget(ConfigTextLabel(discription, fnt_size))
+            description_label = ConfigTextLabel(discription, fnt_size)
+            self.description_label = description_label
+            if tooltip:
+                description_label.setToolTip(tooltip)
+            layout.addWidget(description_label)
         if insert_stretch:
             layout.insertStretch(-1)
         if isinstance(widget, QWidget):
+            if tooltip and not widget.toolTip():
+                widget.setToolTip(tooltip)
             layout.addWidget(widget)
         else:
             layout.addLayout(widget)
         self.widget = widget
-        self.setContentsMargins(*content_margins)
 
 
 def combobox_with_label(sel: List[str], name: str, discription: str = None, vertical_layout: bool = False, target_block: QWidget = None, fix_size: bool = True, parent: QWidget = None, insert_stretch: bool = False) -> Tuple[ConfigComboBox, QWidget]:
     combox = ConfigComboBox(fix_size=fix_size, scrollWidget=parent)
     combox.addItems(sel)
+    if discription:
+        combox.setToolTip(discription)
     if target_block is None:
-        sublock = ConfigSubBlock(combox, name, discription, vertical_layout=vertical_layout, insert_stretch=insert_stretch, fnt_size=CONFIG_FONTSIZE_TABLE-2)
+        sublock = ConfigSubBlock(
+            combox,
+            name,
+            discription,
+            vertical_layout=vertical_layout,
+            insert_stretch=insert_stretch,
+            fnt_size=CONFIG_FONTSIZE_CONTENT,
+        )
+        for label in (sublock.name_label, sublock.description_label):
+            if label is not None:
+                font = label.font()
+                font.setPixelSize(CONFIG_FONTSIZE_CONTENT)
+                label.setFont(font)
         sublock.layout().setAlignment(Qt.AlignmentFlag.AlignLeft)
         sublock.layout().setSpacing(12)
         return combox, sublock
     else:
         layout = target_block.layout()
         layout.addSpacing(12)
-        layout.addWidget(ConfigTextLabel(name, CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal))
+        textlabel = ConfigTextLabel(name, CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        font = textlabel.font()
+        font.setPixelSize(CONFIG_FONTSIZE_CONTENT)
+        textlabel.setFont(font)
+        if discription:
+            textlabel.setToolTip(discription)
+        layout.addWidget(textlabel)
         layout.addWidget(combox)
         return combox, target_block
     
 def checkbox_with_label(name: str, discription: str = None, target_block: QWidget = None):
     checkbox = QCheckBox()
+    checkbox.setObjectName('ConfigCheckBox')
     if discription is not None:
         font = checkbox.font()
         font.setPointSizeF(CONFIG_FONTSIZE_CONTENT * 0.8)
         checkbox.setFont(font)
         checkbox.setText(discription)
+        checkbox.setToolTip(discription)
         vertical_layout = True
     else:
         vertical_layout = False
 
     if target_block is None:
-        sublock = ConfigSubBlock(checkbox, name, vertical_layout=vertical_layout)
+        sublock = ConfigSubBlock(checkbox, name, vertical_layout=vertical_layout, tooltip=discription)
         if vertical_layout is False:
             sublock.layout().addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding))
         target_block = sublock
@@ -169,7 +236,8 @@ class ConfigBlock(Widget):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.vlayout = QVBoxLayout(self)
-        self.vlayout.setSpacing(0)
+        self.vlayout.setContentsMargins(0, 0, 0, 0)
+        self.vlayout.setSpacing(CONFIG_CONTENT_MARGIN)
         self.vlayout.setSizeConstraint(LAYOUT_SET_MINIMUM_SIZE)
         self.setContentsMargins(0, 0, 0, 0)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
@@ -209,21 +277,28 @@ class ConfigBlock(Widget):
 class ConfigContent(QStackedWidget):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.setObjectName('ConfigContent')
         self.config_block_list: List[ConfigBlock] = []
         self.setContentsMargins(0, 0, 0, 0)
         self.section_index = {}
 
     def addConfigBlock(self, block: ConfigBlock, section_key: str):
         scroll_area = QScrollArea()
+        scroll_area.setObjectName('ConfigContentScrollArea')
+        scroll_area.viewport().setObjectName('ConfigContentViewport')
+        fadeout_scrollbar = section_key != 'llm_profile'
+        scroll_area.scrollbar_v = ScrollBar(Qt.Orientation.Vertical, scroll_area, fadeout=fadeout_scrollbar, hover_style=True)
+        scroll_area.scrollbar_h = ScrollBar(Qt.Orientation.Horizontal, scroll_area, fadeout=fadeout_scrollbar, hover_style=True)
         scroll_area.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         scroll_area.setWidgetResizable(True)
         scroll_area.setContentsMargins(0, 0, 0, 0)
         scroll_content = Widget()
+        scroll_content.setObjectName('ConfigContentScrollContent')
         scroll_content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         scroll_layout = QHBoxLayout(scroll_content)
         scroll_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         scroll_layout.setSizeConstraint(LAYOUT_SET_MINIMUM_SIZE)
-        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setContentsMargins(*CONFIG_CONTENT_MARGINS)
         scroll_layout.addWidget(block, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         scroll_layout.addStretch()
         scroll_area.setWidget(scroll_content)
@@ -235,6 +310,19 @@ class ConfigContent(QStackedWidget):
         index = self.section_index.get(section_key)
         if index is not None:
             self.setCurrentIndex(index)
+
+    def scrollWidgetToTop(self, section_key: str, widget: QWidget):
+        index = self.section_index.get(section_key)
+        if index is None:
+            return
+        scroll_area = self.widget(index)
+
+        def scroll_to_widget():
+            scroll_content = scroll_area.widget()
+            top = widget.mapTo(scroll_content, widget.rect().topLeft()).y()
+            scroll_area.verticalScrollBar().setValue(max(0, top - 12))
+
+        QTimer.singleShot(0, scroll_to_widget)
 
     def wheelEvent(self, event) -> None:
         widget = self.currentWidget()
@@ -330,7 +418,12 @@ class ConfigTable(QTreeView):
                 self.section_pressed.emit(section_key)
 
 
-class ConfigPanel(QDialog):
+class ConfigPanel(FramelessWindow):
+    """Non-modal frameless settings window.
+
+    >>> issubclass(ConfigPanel, FramelessWindow)
+    True
+    """
 
     save_config = Signal()
     unload_models = Signal()
@@ -339,14 +432,28 @@ class ConfigPanel(QDialog):
     reload_textstyle = Signal(bool)
     show_only_custom_font = Signal(bool)
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    dictionary_urls = DICTIONARY_URLS
+
+
+    def __init__(self, parent: QWidget = None) -> None:
+        window_type = getattr(Qt, 'WindowType', Qt)
+        # Establish the owned top-level type before frameless initialization.
+        super().__init__(parent, window_type.Dialog)
         self._outside_click_filter_installed = False
         self.setObjectName("ConfigPanel")
+        # QNSWindow composites a transparent outer inset as an opaque black band.
+        opaque_frame = ON_WINDOWS or ON_MACOS
+        self.setProperty('opaqueFrame', opaque_frame)
+        self.setProperty('nativeFrame', ON_WINDOWS)
         self.setWindowTitle(self.tr('Settings'))
         self.setWindowModality(Qt.WindowModality.NonModal)
-        self.setSizeGripEnabled(True)
-        self.resize(900, 640)
+        widget_attribute = getattr(Qt, 'WidgetAttribute', Qt)
+        if not opaque_frame:
+            self.setAttribute(widget_attribute.WA_TranslucentBackground)
+        self.setAttribute(widget_attribute.WA_StyledBackground)
+        if ON_MACOS:
+            self.windowEffect.removeShadowEffect(self.winId())
+        self.resize(900, 720)
         self.setMinimumSize(720, 520)
         self.configTable = ConfigTable()
         self.configTable.section_pressed.connect(self.showSection)
@@ -354,32 +461,53 @@ class ConfigPanel(QDialog):
         moduleTableItem = self.configTable.addHeader(self.tr('Modules'))
         generalTableItem = self.configTable.addHeader(self.tr('General'))
         
-        label_modules = self.tr('Module Actions')
         label_text_det = self.tr('Detector')
         label_text_ocr = self.tr('OCR')
         label_inpaint = self.tr('Inpainter')
         label_translator = self.tr('Translator')
+        label_pipeline = self.tr('Pipeline')
+        label_llm_profile = self.tr('LLM Profile')
         label_application = self.tr('Application')
         label_typesetting = self.tr('Typesetting')
+        label_spellcheck = self.tr('Spell Checker')
 
-        moduleConfigPanel = self.addConfigBlock(label_modules, moduleTableItem, 'modules')
-        dlConfigPanel = self.addConfigBlock(label_text_det, moduleTableItem, 'detector')
-        ocrConfigPanel = self.addConfigBlock(label_text_ocr, moduleTableItem, 'ocr')
-        inpaintConfigPanel = self.addConfigBlock(label_inpaint, moduleTableItem, 'inpainter')
-        translatorConfigPanel = self.addConfigBlock(label_translator, moduleTableItem, 'translator')
+        pipelineConfigPanel = self.addConfigBlock(label_pipeline, moduleTableItem, 'pipeline')
+        llmProfileConfigPanel = self.addConfigBlock(label_llm_profile, moduleTableItem, 'llm_profile')
         applicationConfigPanel = self.addConfigBlock(label_application, generalTableItem, 'application')
         typesettingConfigPanel = self.addConfigBlock(label_typesetting, generalTableItem, 'typesetting')
+        spellcheckConfigPanel = self.addConfigBlock(label_spellcheck, generalTableItem, 'spellcheck')
         
-        self.empty_runcache_checker, empty_runcache_subblock = checkbox_with_label(self.tr('Empty cache after RUN'), discription=self.tr('Empty cache after RUN to save memory.'))
-        moduleConfigPanel.vlayout.addWidget(empty_runcache_subblock)
+        pipeline_options = QWidget()
+        pipeline_options.setObjectName('PipelineModuleOptions')
+        pipeline_options.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        pipeline_options_layout = QVBoxLayout(pipeline_options)
+        pipeline_options_layout.setContentsMargins(0, 0, 0, 0)
+        pipeline_options_layout.setSpacing(CONFIG_CONTENT_ROW_SPACING)
+
+        self.empty_runcache_checker = QCheckBox(self.tr('Empty cache after RUN'))
+        self.empty_runcache_checker.setObjectName('PipelineModuleActionCheckBox')
+        self.empty_runcache_checker.setToolTip(
+            self.tr('Empty cache after RUN to save memory.')
+        )
+        pipeline_options_layout.addWidget(self.empty_runcache_checker)
         self.empty_runcache_checker.stateChanged.connect(self.on_runcache_changed)
-        self.package_auto_install_checker, msublock = checkbox_with_label(
-            self.tr('Auto install missing packages'),
-            discription=self.tr('Install missing Python packages automatically when a selected module requires them.'),
+        self.package_auto_install_checker = QCheckBox(
+            self.tr('Auto install missing packages')
+        )
+        self.package_auto_install_checker.setObjectName(
+            'PipelineModuleActionCheckBox'
+        )
+        self.package_auto_install_checker.setToolTip(
+            self.tr(
+                'Install missing Python packages automatically when a selected '
+                'module requires them.'
+            )
         )
         self.package_auto_install_checker.stateChanged.connect(self.on_package_auto_install_changed)
-        moduleConfigPanel.vlayout.addWidget(msublock)
+        pipeline_options_layout.addWidget(self.package_auto_install_checker)
         module_actions = QWidget()
+        module_actions.setObjectName('ConfigInlineRow')
+        module_actions.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         module_actions_layout = QHBoxLayout(module_actions)
         module_actions_layout.setContentsMargins(0, 0, 0, 0)
         module_actions_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -393,25 +521,28 @@ class ConfigPanel(QDialog):
         self.unload_model_btn.clicked.connect(self.unload_models)
         self.unload_model_btn.setFixedHeight(PUSHBTN_FIXED_HEIGHT)
         module_actions_layout.addWidget(self.unload_model_btn)
-        moduleConfigPanel.addBlockWidget(module_actions)
+        pipeline_options_layout.addWidget(module_actions)
+        pipelineConfigPanel.vlayout.addWidget(pipeline_options)
 
         self.detect_config_panel = TextDetectConfigPanel(self.tr('Detector'), scrollWidget=self)
-        self.detect_config_panel.module_label.hide()
-        self.detect_sub_block = dlConfigPanel.addBlockWidget(self.detect_config_panel)
-        self.detect_config_panel.keep_existing_checker.clicked.connect(self.on_keepline_clicked)
+        self.detect_sub_block = pipelineConfigPanel.addBlockWidget(self.detect_config_panel)
 
         self.ocr_config_panel = OCRConfigPanel(self.tr('OCR'), scrollWidget=self)
-        self.ocr_config_panel.module_label.hide()
-        self.ocr_sub_block = ocrConfigPanel.addBlockWidget(self.ocr_config_panel)
+        self.ocr_sub_block = pipelineConfigPanel.addBlockWidget(self.ocr_config_panel)
 
         self.inpaint_config_panel = InpaintConfigPanel(self.tr('Inpainter'), scrollWidget=self)
-        self.inpaint_config_panel.module_label.hide()
-        self.inpaint_sub_block = inpaintConfigPanel.addBlockWidget(self.inpaint_config_panel)
-        self.inpaint_config_panel.filter_mask_by_bboxes_checker.clicked.connect(self.on_filter_mask_by_bboxes_clicked)
+        self.inpaint_sub_block = pipelineConfigPanel.addBlockWidget(self.inpaint_config_panel)
 
         self.trans_config_panel = TranslatorConfigPanel(label_translator, scrollWidget=self)
-        self.trans_config_panel.module_label.hide()
-        self.trans_sub_block = translatorConfigPanel.addBlockWidget(self.trans_config_panel)
+        self.trans_sub_block = pipelineConfigPanel.addBlockWidget(self.trans_config_panel)
+        self.pipeline_module_panels = {
+            'detector': self.detect_config_panel,
+            'ocr': self.ocr_config_panel,
+            'inpainter': self.inpaint_config_panel,
+            'translator': self.trans_config_panel,
+        }
+        self.llm_profiles_panel = LLMProfilesWidget(scrollWidget=self)
+        llmProfileConfigPanel.addBlockWidget(self.llm_profiles_panel)
 
         self.open_on_startup_checker, _ = applicationConfigPanel.addCheckBox(self.tr('Reopen last project on startup'))
         self.open_on_startup_checker.stateChanged.connect(self.on_open_onstartup_changed)
@@ -419,7 +550,87 @@ class ConfigPanel(QDialog):
         self.check_update_on_startup_checker, _ = applicationConfigPanel.addCheckBox(self.tr('Check update on startup'))
         self.check_update_on_startup_checker.stateChanged.connect(self.on_check_update_onstartup_changed)
 
+        self.spellcheck_checker, _ = spellcheckConfigPanel.addCheckBox(self.tr('Enable'))
+        self.spellcheck_checker.stateChanged.connect(self.on_spellcheck_changed)
+
+        self.spellcheck_on_source_checker, _ = spellcheckConfigPanel.addCheckBox(self.tr('Apply for source text'))
+        self.spellcheck_on_source_checker.stateChanged.connect(self.on_spellcheck_on_source_changed)
+
+        # Edit Distance Spinbox
+        self.spellcheck_distance_spin = QSpinBox(self)
+        self.spellcheck_distance_spin.setObjectName('SpellCheckDistanceSpin')
+        self.spellcheck_distance_spin.setRange(1, 4)
+        self.spellcheck_distance_spin.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.spellcheck_distance_spin.setToolTip(self.tr("Higher value, slower analysis"))
+        self.spellcheck_distance_spin.valueChanged.connect(self.on_spellcheck_distance_changed)
+
+        dist_layout = QHBoxLayout()
+        dist_layout.setContentsMargins(0, 0, 0, 0)
+        dist_layout.setSpacing(12)
+        dist_label = ConfigTextLabel(self.tr("Edit Distance"), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        dist_label.setToolTip(self.tr("Higher value, slower analysis"))
+        dist_layout.addWidget(dist_label)
+        dist_layout.addWidget(self.spellcheck_distance_spin)
+        dist_layout.insertStretch(-1)
+
+        dist_block = QVBoxLayout()
+        dist_block.setContentsMargins(0, 0, 0, 0)
+        dist_block.setSpacing(4)
+        dist_block.addLayout(dist_layout)
+
+        spellcheckConfigPanel.addBlockWidget(dist_block)
+
+        # Dictionary Words Manager Button
+        self.manage_words_btn = QPushButton(parent=self)
+        self.manage_words_btn.setText(self.tr("Dictionary Words..."))
+        self.manage_words_btn.clicked.connect(self.open_words_manager)
+        self.manage_words_btn.setFixedHeight(PUSHBTN_FIXED_HEIGHT)
+        spellcheckConfigPanel.addBlockWidget(self.manage_words_btn)
+
+        # Repository Dictionaries List
+        repo_layout = QVBoxLayout()
+        repo_label = ConfigTextLabel(self.tr("Repository Dictionaries"), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Bold)
+        repo_layout.addWidget(repo_label)
+
+        self.repo_dicts_list = QListWidget(self)
+        self.repo_dicts_list.setObjectName('SpellCheckDictionaryList')
+        self.repo_dicts_list.setFixedHeight(150)
+        self.repo_dicts_list.scrollbar_v = ScrollBar(Qt.Orientation.Vertical, self.repo_dicts_list, hover_style=True)
+        self.repo_dicts_list.scrollbar_h = ScrollBar(Qt.Orientation.Horizontal, self.repo_dicts_list, hover_style=True)
+        self.repo_dicts_list.itemChanged.connect(self.on_repo_dict_item_changed)
+        repo_layout.addWidget(self.repo_dicts_list)
+
+        spellcheckConfigPanel.addBlockWidget(repo_layout)
+
+        # External Dictionaries List
+        ext_layout = QVBoxLayout()
+        ext_label = ConfigTextLabel(self.tr("External Dictionaries"), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Bold)
+        ext_layout.addWidget(ext_label)
+
+        self.external_dicts_list = QListWidget(self)
+        self.external_dicts_list.setObjectName('SpellCheckDictionaryList')
+        self.external_dicts_list.setFixedHeight(120)
+        self.external_dicts_list.scrollbar_v = ScrollBar(Qt.Orientation.Vertical, self.external_dicts_list, hover_style=True)
+        self.external_dicts_list.scrollbar_h = ScrollBar(Qt.Orientation.Horizontal, self.external_dicts_list, hover_style=True)
+        ext_layout.addWidget(self.external_dicts_list)
+
+        ext_btns_layout = QHBoxLayout()
+        self.add_ext_btn = QPushButton(self.tr("Add Dictionary..."), self)
+        self.add_ext_btn.clicked.connect(self.add_external_dictionary)
+        self.add_ext_btn.setFixedHeight(PUSHBTN_FIXED_HEIGHT)
+        self.remove_ext_btn = QPushButton(self.tr("Remove Selected"), self)
+        self.remove_ext_btn.clicked.connect(self.remove_external_dictionary)
+        self.remove_ext_btn.setFixedHeight(PUSHBTN_FIXED_HEIGHT)
+
+        ext_btns_layout.addWidget(self.add_ext_btn)
+        ext_btns_layout.addWidget(self.remove_ext_btn)
+        ext_layout.addLayout(ext_btns_layout)
+
+        self.spellcheck_subblock = spellcheckConfigPanel.addBlockWidget(ext_layout)
+
         update_status_widget = QWidget()
+        update_status_widget.setObjectName('ConfigInlineRow')
+        update_status_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         update_status_layout = QHBoxLayout(update_status_widget)
         update_status_layout.setContentsMargins(0, 0, 0, 0)
         update_status_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -467,7 +678,9 @@ class ConfigPanel(QDialog):
 
         global_fntfmt_widget = Widget()
         global_fntfmt_layout = QGridLayout(global_fntfmt_widget)
-        global_fntfmt_layout.setSpacing(0)
+        global_fntfmt_layout.setContentsMargins(0, 0, 0, 0)
+        global_fntfmt_layout.setHorizontalSpacing(CONFIG_CONTENT_MARGIN)
+        global_fntfmt_layout.setVerticalSpacing(CONFIG_CONTENT_MARGIN)
         global_fntfmt_widget.setContentsMargins(0, 0, 0, 0)
 
         b = typesettingConfigPanel.addBlockWidget(global_fntfmt_widget)
@@ -536,11 +749,42 @@ class ConfigPanel(QDialog):
         splitter.addWidget(self.configContent)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
-        hlayout = QHBoxLayout(self)
 
-        hlayout.addWidget(splitter)
-        hlayout.setSpacing(0)
-        hlayout.setContentsMargins(0, 0, 0, 0)
+        root_layout = QVBoxLayout(self)
+        margin = 0 if opaque_frame else 5
+        root_layout.setContentsMargins(margin, margin, margin, margin)
+
+        surface = QFrame(self)
+        surface.setObjectName('ConfigPanelSurface')
+        root_layout.addWidget(surface)
+
+        window_layout = QVBoxLayout(surface)
+        window_layout.setSpacing(0)
+        window_layout.setContentsMargins(6, 0, 6, 6)
+
+        self.title_bar = QWidget(surface)
+        self.title_bar.setObjectName('ConfigPanelTitleBar')
+        self.title_bar.setFixedHeight(TITLEBAR_HEIGHT)
+        title_layout = QGridLayout(self.title_bar)
+        title_layout.setContentsMargins(6, 1, 6, 1)
+        title_layout.setSpacing(0)
+        title_layout.setColumnMinimumWidth(0, 46)
+        title_layout.setColumnStretch(1, 1)
+
+        self.title_label = QLabel(self.tr('Settings'), self.title_bar)
+        self.title_label.setObjectName('ConfigPanelTitle')
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_layout.addWidget(self.title_label, 0, 1)
+
+        self.close_button = QPushButton(self.title_bar)
+        self.close_button.setObjectName('closeBtn')
+        self.close_button.setToolTip(self.tr('Close'))
+        self.close_button.setAccessibleName(self.tr('Close'))
+        self.close_button.clicked.connect(self.hide)
+        title_layout.addWidget(self.close_button, 0, 2)
+
+        window_layout.addWidget(self.title_bar)
+        window_layout.addWidget(splitter, 1)
 
         self.configTable.expandAll()
         self.showSection('application')
@@ -550,12 +794,6 @@ class ConfigPanel(QDialog):
 
     def on_package_auto_install_changed(self):
         pcfg.package_manager.auto_install_missing_packages = self.package_auto_install_checker.isChecked()
-
-    def on_keepline_clicked(self):
-        pcfg.module.keep_exist_textlines = self.detect_config_panel.keep_existing_checker.isChecked()
-
-    def on_filter_mask_by_bboxes_clicked(self):
-        pcfg.module.filter_mask_by_bboxes = self.inpaint_config_panel.filter_mask_by_bboxes_checker.isChecked()
 
     def addConfigBlock(self, header: str, parent_item: TableItem, section_key: str) -> ConfigBlock:
         cb = ConfigBlock(parent=self)
@@ -575,14 +813,177 @@ class ConfigPanel(QDialog):
 
     def showSection(self, section_key: str):
         section_key = SECTION_ALIASES.get(section_key, section_key)
+        self._highlightPipelineModule(None)
         self.configContent.showSection(section_key)
         self.configTable.setCurrentSection(section_key)
+
+    def _highlightPipelineModule(self, module_key: str = None):
+        for key, panel in getattr(self, 'pipeline_module_panels', {}).items():
+            panel.setJumpHighlighted(key == module_key)
+
+    def focusPipelineModule(self, module_key: str):
+        panel = self.pipeline_module_panels[module_key]
+        self.showConfigDialog('pipeline')
+        panel.updateModuleParamWidget()
+        if panel.visibleWidget is not None:
+            panel.visibleWidget.show()
+        self._highlightPipelineModule(module_key)
+        self.configContent.scrollWidgetToTop('pipeline', panel.header_widget)
 
     def on_open_onstartup_changed(self):
         pcfg.open_recent_on_startup = self.open_on_startup_checker.isChecked()
 
     def on_check_update_onstartup_changed(self):
         pcfg.check_update_on_startup = self.check_update_on_startup_checker.isChecked()
+
+    def on_spellcheck_changed(self):
+        enabled = self.spellcheck_checker.isChecked()
+        if enabled:
+            manager = SpellCheckManager.get_instance()
+            if not manager.is_available():
+                # Uncheck immediately to prevent UI state drift while prompting
+                self.spellcheck_checker.blockSignals(True)
+                self.spellcheck_checker.setChecked(False)
+                self.spellcheck_checker.blockSignals(False)
+
+                if manager.install_pyspellchecker(self):
+                    self.spellcheck_checker.blockSignals(True)
+                    self.spellcheck_checker.setChecked(True)
+                    self.spellcheck_checker.blockSignals(False)
+                    enabled = True
+                else:
+                    return
+
+        pcfg.spellcheck_enabled = enabled
+        self.spellcheck_on_source_checker.setEnabled(enabled)
+        self.manage_words_btn.setEnabled(enabled)
+        self.repo_dicts_list.setEnabled(enabled)
+        self.external_dicts_list.setEnabled(enabled)
+        self.add_ext_btn.setEnabled(enabled)
+        self.remove_ext_btn.setEnabled(enabled)
+        self.spellcheck_distance_spin.setEnabled(enabled)
+        SpellCheckManager.get_instance().notify_config_changed()
+        self.save_config.emit()
+
+    def on_spellcheck_on_source_changed(self):
+        enabled = self.spellcheck_on_source_checker.isChecked()
+        pcfg.spellcheck_on_source_enabled = enabled
+        SpellCheckManager.get_instance().notify_config_changed()
+        self.save_config.emit()
+
+    def on_spellcheck_distance_changed(self):
+        pcfg.spellcheck_distance = self.spellcheck_distance_spin.value()
+        SpellCheckManager.get_instance().notify_config_changed()
+        self.save_config.emit()
+
+    def open_words_manager(self):
+        dialog = DictionaryManagerDialog(self)
+        dialog.exec_()
+
+    def on_repo_dict_item_changed(self, item):
+        url, filename = item.data(Qt.ItemDataRole.UserRole)
+        save_path = os.path.join(PROGRAM_PATH, 'data', 'dictionaries', filename)
+
+        LOGGER.info(f"on_repo_dict_item_changed: item={item.text()}, checkState={item.checkState()}")
+
+        if item.checkState() == Qt.CheckState.Checked:
+            if not os.path.exists(save_path):
+                # Uncheck immediately so it doesn't look enabled while downloading
+                self.repo_dicts_list.blockSignals(True)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                self.repo_dicts_list.blockSignals(False)
+                
+                # Start async download
+                self.download_repo_dict_async(item, url, filename)
+                return
+
+        self.save_repo_dicts_config()
+
+    def save_repo_dicts_config(self):
+        self.repo_dicts_list.blockSignals(True)
+        try:
+            enabled_files = []
+            for idx in range(self.repo_dicts_list.count()):
+                it = self.repo_dicts_list.item(idx)
+                if it.checkState() == Qt.CheckState.Checked:
+                    _, fname = it.data(Qt.ItemDataRole.UserRole)
+                    enabled_files.append(fname)
+
+            pcfg.spellcheck_repo_dicts = ",".join(enabled_files)
+            SpellCheckManager.get_instance().notify_config_changed()
+            self.save_config.emit()
+        finally:
+            self.repo_dicts_list.blockSignals(False)
+
+    def download_repo_dict_async(self, item, url, filename):
+        save_path = os.path.join(PROGRAM_PATH, 'data', 'dictionaries', filename)
+
+        progress = QProgressDialog(self.tr("Downloading dictionary..."), self.tr("Cancel"), 0, 100, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+
+        thread = DictDownloadThread(url, save_path)
+
+        def on_progress(downloaded, total):
+            if total > 0:
+                percent = int(downloaded * 100 / total)
+                progress.setValue(percent)
+
+        def on_finished(success, err):
+            progress.close()
+            if success:
+                LOGGER.info(f"download_repo_dict_async: successful download of {filename}")
+                self.repo_dicts_list.blockSignals(True)
+                try:
+                    item.setCheckState(Qt.CheckState.Checked)
+                    # Remove " (Installed local)" if it exists, then append it
+                    clean_text = item.text().replace(self.tr(" - Installed"), "")
+                    item.setText(clean_text + self.tr(" - Installed"))
+                finally:
+                    self.repo_dicts_list.blockSignals(False)
+                
+                self.save_repo_dicts_config()
+                
+                QMessageBox.information(self, self.tr("Download Complete"), self.tr("Dictionary downloaded successfully!"))
+            else:
+                LOGGER.warning(f"download_repo_dict_async: download failed for {filename}: {err}")
+                if "cancelled" not in err.lower():
+                    QMessageBox.warning(self, self.tr("Download Failed"), self.tr("Failed to download dictionary: ") + err)
+
+        thread.progress.connect(on_progress)
+        thread.finished.connect(on_finished)
+        progress.canceled.connect(thread.cancel)
+
+        self.active_download_thread = thread
+        thread.start()
+        progress.exec_()
+        thread.wait()
+
+    def add_external_dictionary(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Select Dictionary File"),
+            "",
+            self.tr("Dictionary files (*.txt *.dic)")
+        )
+        if path:
+            self.external_dicts_list.addItem(path)
+            self.update_external_dicts_config()
+
+    def remove_external_dictionary(self):
+        selected_items = self.external_dicts_list.selectedItems()
+        if not selected_items:
+            return
+        for item in selected_items:
+            self.external_dicts_list.takeItem(self.external_dicts_list.row(item))
+        self.update_external_dicts_config()
+
+    def update_external_dicts_config(self):
+        paths = []
+        for idx in range(self.external_dicts_list.count()):
+            paths.append(self.external_dicts_list.item(idx).text())
+        pcfg.spellcheck_external_dict_path = ";".join(paths)
+        SpellCheckManager.get_instance().notify_config_changed()
+        self.save_config.emit()
 
     def setLatestVersion(self, version: str):
         self.latest_version_label.setText(self.tr('Latest version: ') + version)
@@ -650,21 +1051,44 @@ class ConfigPanel(QDialog):
         self.show_only_custom_font.emit(pcfg.let_show_only_custom_fonts_flag)
 
     def focusOnTranslator(self):
-        self.showConfigDialog('translator')
+        self.focusPipelineModule('translator')
+
+    def focusOnLLMProfile(self, profile_id: str, expand_details: bool = True, target: str = 'api_key'):
+        self.showConfigDialog('llm_profile')
+        self.llm_profiles_panel.focusProfileControl(profile_id, target=target, expand_details=expand_details)
 
     def focusOnInpaint(self):
-        self.showConfigDialog('inpainter')
+        self.focusPipelineModule('inpainter')
 
     def focusOnDetect(self):
-        self.showConfigDialog('detector')
+        self.focusPipelineModule('detector')
 
     def focusOnOCR(self):
-        self.showConfigDialog('ocr')
+        self.focusPipelineModule('ocr')
 
     def hideEvent(self, e) -> None:
+        self._highlightPipelineModule(None)
+        if hasattr(self, 'llm_profiles_panel'):
+            self.llm_profiles_panel.collapseProfiles()
         self._removeOutsideClickFilter()
         self.save_config.emit()
         return super().hideEvent(e)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        geometry = self.frameGeometry()
+        geometry.moveCenter(parent.window().frameGeometry().center())
+        self.move(geometry.topLeft())
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.hide()
+            event.accept()
+            return
+        return super().keyPressEvent(event)
 
     def _installOutsideClickFilter(self):
         if self._outside_click_filter_installed:
@@ -683,15 +1107,45 @@ class ConfigPanel(QDialog):
         self._outside_click_filter_installed = False
 
     def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.MouseButtonPress and self.isVisible():
+        if not self.isVisible() or not isinstance(watched, QWidget):
+            return QWidget.eventFilter(self, watched, event)
+
+        event_type = event.type()
+        if event_type == QEvent.Type.MouseButtonPress:
             if (
-                isinstance(watched, QWidget)
-                and QApplication.activePopupWidget() is None
+                QApplication.activePopupWidget() is None
                 and not self._widgetInsidePanel(watched)
                 and not self._activeWidgetInWhitelist()
             ):
                 self.hide()
-        return super().eventFilter(watched, event)
+
+        handled = super().eventFilter(watched, event)
+        if handled:
+            return True
+        if (
+            self._widgetInsidePanel(watched)
+            and isinstance(event, QMouseEvent)
+            and event_type == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._can_drag_title(watched)
+        ):
+            FramelessMoveResize.startSystemMove(
+                self,
+                self._global_mouse_pos(event),
+            )
+            return True
+        return handled
+
+    @staticmethod
+    def _global_mouse_pos(event: QMouseEvent):
+        if hasattr(event, 'globalPosition'):
+            return event.globalPosition().toPoint()
+        return event.globalPos()
+
+    def _can_drag_title(self, watched: QWidget) -> bool:
+        if watched is self.close_button or self.close_button.isAncestorOf(watched):
+            return False
+        return watched is self.title_bar or self.title_bar.isAncestorOf(watched)
 
     def _widgetInsidePanel(self, widget) -> bool:
         while widget is not None:
@@ -732,6 +1186,64 @@ class ConfigPanel(QDialog):
         if pcfg.open_recent_on_startup:
             self.open_on_startup_checker.setChecked(True)
         self.check_update_on_startup_checker.setChecked(pcfg.check_update_on_startup)
+        
+        # Setup repository dictionaries
+        active_repos = pcfg.spellcheck_repo_dicts.split(',')
+        active_repos = [x.strip() for x in active_repos if x.strip()]
+        
+        self.repo_dicts_list.blockSignals(True)
+        self.repo_dicts_list.clear()
+        
+        for lang_name, url in self.dictionary_urls.items():
+            filename = url.split('/')[-1]
+            dict_path = os.path.join(PROGRAM_PATH, 'data', 'dictionaries', filename)
+
+            display_text = self.tr(lang_name)
+            exists = os.path.exists(dict_path)
+            if exists:
+                display_text += self.tr(" - Installed")
+
+            item = QListWidgetItem(display_text, self.repo_dicts_list)
+            item.setData(Qt.ItemDataRole.UserRole, (url, filename))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+            if filename in active_repos and exists:
+                item.setCheckState(Qt.CheckState.Checked)
+            else:
+                item.setCheckState(Qt.CheckState.Unchecked)
+        self.repo_dicts_list.blockSignals(False)
+
+        # Synchronize config to remove any manually deleted dictionaries
+        enabled_files = []
+        for idx in range(self.repo_dicts_list.count()):
+            it = self.repo_dicts_list.item(idx)
+            if it.checkState() == Qt.CheckState.Checked:
+                _, fname = it.data(Qt.ItemDataRole.UserRole)
+                enabled_files.append(fname)
+        pcfg.spellcheck_repo_dicts = ",".join(enabled_files)
+
+        # Setup external dictionaries
+        self.external_dicts_list.clear()
+        ext_paths = pcfg.spellcheck_external_dict_path.split(';')
+        for p in ext_paths:
+            p = p.strip()
+            if p:
+                self.external_dicts_list.addItem(p)
+
+        self.spellcheck_checker.blockSignals(True)
+        if pcfg.spellcheck_enabled and not SpellCheckManager.get_instance().is_available():
+            pcfg.spellcheck_enabled = False
+        self.spellcheck_checker.setChecked(pcfg.spellcheck_enabled)
+        self.spellcheck_checker.blockSignals(False)
+        self.spellcheck_on_source_checker.setChecked(getattr(pcfg, 'spellcheck_on_source_enabled', False))
+        self.spellcheck_on_source_checker.setEnabled(pcfg.spellcheck_enabled)
+        self.spellcheck_distance_spin.setValue(getattr(pcfg, 'spellcheck_distance', 1))
+        self.spellcheck_distance_spin.setEnabled(pcfg.spellcheck_enabled)
+        self.manage_words_btn.setEnabled(pcfg.spellcheck_enabled)
+        self.repo_dicts_list.setEnabled(pcfg.spellcheck_enabled)
+        self.external_dicts_list.setEnabled(pcfg.spellcheck_enabled)
+        self.add_ext_btn.setEnabled(pcfg.spellcheck_enabled)
+        self.remove_ext_btn.setEnabled(pcfg.spellcheck_enabled)
         self.huggingface_mirror_combobox.setCurrentText(mirror_to_display(
             pcfg.mirrors.huggingface,
             none_label=self.tr('None'),
@@ -741,8 +1253,6 @@ class ConfigPanel(QDialog):
             none_label=self.tr('None'),
         ))
 
-        self.detect_config_panel.keep_existing_checker.setChecked(pcfg.module.keep_exist_textlines)
-        self.inpaint_config_panel.filter_mask_by_bboxes_checker.setChecked(pcfg.module.filter_mask_by_bboxes)
         self.let_effect_combox.setCurrentIndex(pcfg.let_fnteffect_flag)
         self.let_fntsize_combox.setCurrentIndex(pcfg.let_fntsize_flag)
         self.let_fntstroke_combox.setCurrentIndex(pcfg.let_fntstroke_flag)
@@ -754,7 +1264,6 @@ class ConfigPanel(QDialog):
         self.let_autolayout_checker.setChecked(pcfg.let_autolayout_flag)
         self.let_uppercase_checker.setChecked(pcfg.let_uppercase_flag)
         self.let_textstyle_indep_checker.setChecked(pcfg.let_textstyle_indep_flag)
-        self.ocr_config_panel.restoreEmptyOCRChecker.setChecked(pcfg.restore_ocr_empty)
         self.rst_imgformat_combobox.setCurrentText(pcfg.imgsave_ext.replace('.', '').upper())
         self.intermediate_imgformat_combobox.setCurrentText(pcfg.intermediate_imgsave_ext.replace('.', '').upper())
         self.rst_imgquality_edit.setText(str(pcfg.imgsave_quality))

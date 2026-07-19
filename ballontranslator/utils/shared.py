@@ -43,11 +43,15 @@ if not osp.exists(DEFAULT_TEXTSTYLE_DIR):
 CONFIG_FONTSIZE_HEADER = 15
 CONFIG_FONTSIZE_TABLE = 13
 CONFIG_FONTSIZE_CONTENT = 13
+CONFIG_CONTENT_MARGIN = 27
+CONFIG_CONTENT_MARGINS = (CONFIG_CONTENT_MARGIN,) * 4
+CONFIG_CONTENT_ROW_SPACING = 6
 
 CONFIG_COMBOBOX_HEIGHT = 26
 CONFIG_COMBOBOX_SHORT = 180
 CONFIG_COMBOBOX_MIDEAN = 300
 CONFIG_COMBOBOX_LONG = 420
+CONFIG_MODULE_PARAM_BODY_MIN_WIDTH = 420
 
 _size2width = {
     'short': CONFIG_COMBOBOX_SHORT,
@@ -99,6 +103,7 @@ TRANSLATE_DIR = osp.join(RESOURCE_DIR, 'translate')
 DISPLAY_LANGUAGE_MAP = {
     "English": "English",
     "简体中文": "zh_CN",
+    "繁體中文": "zh_TW",
     "Русский": "ru_RU",
     "Português (Brasil)": "pt_BR",
     "한국어": "ko_KR",
@@ -119,6 +124,24 @@ DEFAULT_DISPLAY_LANG = 'English'
 USE_PYSIDE6 = False
 ON_MACOS = sys.platform == 'darwin'
 ON_WINDOWS = sys.platform == 'win32'
+
+def _detect_apple_silicon() -> bool:
+    if not ON_MACOS:
+        return False
+    import platform
+    if platform.machine().lower() in {'arm64', 'aarch64'}:
+        return True
+    try:
+        import subprocess
+        out = subprocess.run(
+            ['sysctl', '-n', 'hw.optional.arm64'],
+            capture_output=True, text=True, timeout=2,
+        )
+        return out.stdout.strip() == '1'
+    except Exception:
+        return False
+
+ON_APPLE_SILICON = _detect_apple_silicon()
 HEADLESS = False
 DEBUG = False
 args = None
@@ -151,6 +174,12 @@ showed_exception = set()
 create_errdialog_in_mainthread = lambda *args, **kwargs: None
 
 create_infodialog_in_mainthread = lambda *args, **kwargs: None
+
+show_llm_key_dialog_in_mainthread = lambda *args, **kwargs: None
+
+show_llm_model_dialog_in_mainthread = lambda *args, **kwargs: None
+
+show_llm_base_url_dialog_in_mainthread = lambda *args, **kwargs: None
 
 def load_cache():
     global cache_data

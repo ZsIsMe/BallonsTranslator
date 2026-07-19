@@ -164,7 +164,8 @@ class TextBlkItem(QGraphicsTextItem):
 
     def repaint_background(self):
         empty = self.document().isEmpty()
-        if self.repainting:
+        if self.repainting or self.reshaping:
+            # disable background repainting to avoid heavy redrawing in the whole process
             return
 
         paint_stroke = self.fontformat.stroke_width > 0
@@ -256,10 +257,13 @@ class TextBlkItem(QGraphicsTextItem):
     def startReshape(self):
         self.oldRect = self.absBoundingRect(qrect=True)
         self.reshaping = True
+        # disable background repainting to avoid heavy redrawing in the whole process
+        self.background_pixmap = None
 
     def endReshape(self):
         self.reshaped.emit(self)
         self.reshaping = False
+        self.repaint_background()
 
     def padRect(self, rect: QRectF) -> QRectF:
         p = self.padding()
@@ -385,15 +389,17 @@ class TextBlkItem(QGraphicsTextItem):
             layout = VerticalTextDocumentLayout(doc, self.fontformat)
         else:
             layout = HorizontalTextDocumentLayout(doc, self.fontformat)
-            # letter spacing is managed by doc's format
-            cursor = QTextCursor(doc)
-            cursor.joinPreviousEditBlock()
-            char_fmt = QTextCharFormat()
-            char_fmt.setFontLetterSpacingType(QFont.SpacingType.PercentageSpacing)
-            char_fmt.setFontLetterSpacing(self.fontformat.letter_spacing * 100)
-            cursor.select(QTextCursor.SelectionType.Document)
-            self.set_cursor_cfmt(cursor, char_fmt, True)
-            cursor.endEditBlock()
+
+        # letter spacing must be reset for different layout type
+        reset_spacing_val = 1 if vertical else self.fontformat.letter_spacing
+        cursor = QTextCursor(doc)
+        cursor.joinPreviousEditBlock()
+        char_fmt = QTextCharFormat()
+        char_fmt.setFontLetterSpacingType(QFont.SpacingType.PercentageSpacing)
+        char_fmt.setFontLetterSpacing(reset_spacing_val * 100)
+        cursor.select(QTextCursor.SelectionType.Document)
+        self.set_cursor_cfmt(cursor, char_fmt, True)
+        cursor.endEditBlock()
         
         self.layout = layout
         doc.setDocumentLayout(layout)

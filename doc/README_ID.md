@@ -1,12 +1,17 @@
-# BallonTranslator
-[简体中文](/README.md) | [English](/README_EN.md) | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md)
+<p align="center">
+  <img
+    width="256"
+    alt="Spinning fox animation"
+    src="https://github.com/user-attachments/assets/fe44e9a6-c7da-4bc5-8421-87fd6c38a0ba"
+  />
+</p>
 
-Sebuah aplikasi penerjemahan komik/manga yang dibantu oleh deep learning.
+<h1 align="center">BallonsTranslator</h1>
 
-<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
+<p align="center">Sebuah aplikasi penerjemahan komik/manga yang dibantu oleh deep learning.</p>
 
-<p align=center>
-pratinjau
+<p align="center">
+  <a href="/README.md">简体中文</a> | <a href="/README_EN.md">English</a> | <a href="/doc/README_RU.md">Русский</a> | <a href="/doc/README_JA.md">日本語</a> | <a href="/doc/README_ES.md">Español</a> | <a href="/doc/README_FR.md">Français</a> | <a href="/doc/README_PT-BR.md">pt-BR</a> | <a href="/doc/README_KO.md">한국어</a> | Indonesia | <a href="/doc/README_VI.md">Tiếng Việt</a>
 </p>
 
 # Fitur
@@ -24,6 +29,50 @@ pratinjau
   - Mendukung format rich text dan style teks, teks yang diterjemahkan dapat diedit secara langsung.
   - Mendukung pencarian & penggantian kata
   - Mendukung ekspor/impor ke/dari dokumen word
+
+* <details>
+  <summary><i>Terjemahan LLM yang peka terhadap konteks</i></summary>
+
+  **Riwayat terjemahan**
+
+  - Atur **LLM Context** ke **+history** agar `LLMTranslator` melihat contoh dari halaman sebelumnya yang telah selesai. Ini dapat menjaga konsistensi nama, istilah, dan nada. Proses lanjutan dan rentang terpilih juga dapat memakai halaman sebelumnya yang memenuhi syarat.
+  - **Token budget** mengatur jumlah teks terjemahan sebelumnya yang disertakan, dengan prioritas pada halaman yang lebih baru. Halaman saat ini, instruksi, glosarium, dan respons yang dihasilkan membutuhkan ruang tambahan. Nilai defaultnya `4096`.
+  - Anggaran yang lebih besar memberi lebih banyak konteks cerita dan lebih jarang membuang halaman lama, tetapi mengirim lebih banyak teks dan dapat berjalan lebih lambat. Model lokal juga dapat membutuhkan jauh lebih banyak RAM/VRAM. Nilai default `4096` sengaja dibuat konservatif; penyedia umum dengan jendela konteks besar, seperti DeepSeek, sering dapat memakai batas yang lebih tinggi. Sekitar 70% dari batas konteks model adalah batas atas yang wajar (`90000` untuk 128K).
+  - Anggaran riwayat juga memengaruhi cache prompt. Selama riwayat bertambah dalam batas anggaran, permintaan berurutan mempertahankan bagian awal yang sama; penyedia seperti OpenAI dan DeepSeek dapat memakainya kembali dengan harga token input yang lebih murah dan terkadang latensi lebih rendah. Ketika anggaran memaksa halaman lama dibuang, bagian awal itu berubah dan penggunaan cache direset. Anggaran lebih besar mengurangi reset, tetapi mengirim lebih banyak riwayat sehingga tidak menjamin biaya total lebih rendah.
+
+  Tabel berikut adalah perkiraan kasar untuk halaman manga menggunakan DeepSeek, dengan harga token input cache sebesar 10% dari token input biasa. Hasil sebenarnya berbeda menurut proyek, model, dan penyedia.
+
+  | Token budget | Perkiraan riwayat yang dipertahankan (halaman) | Perkiraan biaya total dibanding tanpa riwayat |
+  |---:|---:|---:|
+  | `2048` | 3–4 | 1.65× |
+  | `4096` | 6–9 | 1.79× |
+  | `8192` | 12–19 | 2.10× |
+  | `16384` | 23–38 | 2.66× |
+
+  **Glosarium yang dapat digunakan kembali**
+
+  - Atur **Glossary File** pada dialog Run ke berkas UTF-8 `.json`, `.txt`, atau `.tsv`. Berkas hanya dibaca dan dapat digunakan kembali di berbagai proyek.
+  - **Matching** hanya mengirim entri yang istilah sumbernya terdapat pada halaman terkait. **All** mengirim semua entri dan dapat memakai jauh lebih banyak token.
+  - Format yang didukung meliputi:
+
+    ```text
+    # Teks bergaya Sakura
+    sumber->terjemahan # catatan opsional
+
+    # Teks yang dipisahkan tab
+    sumber<TAB>terjemahan<TAB>catatan opsional
+    ```
+
+    ```json
+    [
+      {"src": "sumber", "dst": "terjemahan", "info": "catatan opsional"}
+    ]
+    ```
+
+  - Pencocokan bersifat literal dan tidak membedakan huruf besar-kecil. Entri yang bertentangan, berkas dengan format yang salah, format yang tidak didukung, dan berkas yang tidak ditemukan akan menghentikan terjemahan sebelum permintaan dikirim ke LLM.
+  - Konteks halaman sebelumnya dan penyisipan glosarium hanya berlaku untuk `LLMTranslator`; penerjemah lain mengabaikan pengaturan ini.
+
+  </details>
 
 # Instalasi
 
@@ -55,9 +104,7 @@ curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts
 
 Jika `curl` tidak tersedia, unduh script dengan `wget -O ...` sebagai gantinya. Aplikasi akan berjalan otomatis setelah instalasi; selanjutnya gunakan `cd BallonsTranslator && ./launch.sh` untuk memulainya lagi.
 
-Aplikasi memeriksa dependensi inti saat startup. Saat Anda memilih modul yang memerlukan pustaka tambahan, aplikasi akan meminta Anda memasang dependensi opsional yang hilang (Anda juga dapat mengaktifkan pemasangan otomatis di pengaturan). Jika pengunduhan model gagal, periksa jaringan/proxy Anda, atau unduh model yang diperlukan dari [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) atau [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) lalu letakkan secara manual di direktori `data`.
-
-Perangkat lunak memiliki pemeriksaan pembaruan bawaan; lihat Panel konfigurasi -> Startup & Update untuk detailnya.
+Aplikasi memeriksa dependensi inti saat startup. Saat Anda memilih modul yang memerlukan pustaka tambahan, aplikasi akan meminta Anda memasang dependensi opsional yang hilang (Anda juga dapat mengaktifkan pemasangan otomatis di pengaturan).
 
 # Penggunaan
 **Disarankan untuk menjalankan program di terminal jika program ini crash dan tidak meninggalkan informasi, lihat gif berikut ini**

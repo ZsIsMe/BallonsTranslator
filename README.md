@@ -1,22 +1,34 @@
+<p align="center">
+  <img
+    width="256"
+    alt="Spinning fox animation"
+    src="https://github.com/user-attachments/assets/fe44e9a6-c7da-4bc5-8421-87fd6c38a0ba"
+  />
+</p>
 
+<h1 align="center">BallonsTranslator</h1>
+
+<p align="center">深度学习辅助漫画翻译工具，支持一键机翻和简单的图像/文本编辑</p>
+
+
+
+<p align="center">
+  简体中文 | <a href="/README_EN.md">English</a> | <a href="/doc/README_RU.md">Русский</a> | <a href="/doc/README_JA.md">日本語</a> | <a href="/doc/README_ES.md">Español</a> | <a href="/doc/README_FR.md">Français</a> | <a href="/doc/README_PT-BR.md">pt-BR</a> | <a href="/doc/README_KO.md">한국어</a> | <a href="/doc/README_ID.md">Indonesia</a> | <a href="/doc/README_VI.md">Tiếng Việt</a>
+</p>
+
+
+
+
+<p align="center">交流反馈 QQ 群：719881337 </p>
+
+ 
+
+
+# Features
 > [!IMPORTANT]  
 > **如打算公开分享本工具的机翻结果，且没有有经验的译者进行过完整的翻译或校对，请在显眼位置注明机翻。**
 
-# BallonTranslator
-简体中文 | [English](/README_EN.md) | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md)
 
-深度学习辅助漫画翻译工具，支持一键机翻和简单的图像/文本编辑  
-
-交流反馈 QQ 群：719881337  
-
-
-<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
-
-<p align=center>
-界面预览
-</p>
-
-# Features
 * 一键机翻  
   - 译文回填参考对原文排版的估计，包括颜色，轮廓，角度，朝向，对齐方式等
   - 最后效果取决于文本检测，识别，抹字，机翻四个模块的整体表现  
@@ -30,6 +42,50 @@
   - 支持所见即所得地富文本编辑和一些基础排版格式调整、[字体样式预设](https://github.com/dmMaze/BallonsTranslator/pull/311)
   - 支持全文/原文/译文查找替换
   - 支持导入导出 word 文档
+
+* <details>
+  <summary><i>支持上下文的 LLM 翻译</i></summary>
+
+  **翻译历史**
+
+  - 将 **LLM 上下文** 设为 **+翻译历史** 后，`LLMTranslator` 会参考之前已完成的页面，有助于统一人名、术语和语气。继续运行和选定范围也可使用范围之前符合条件的页面。
+  - **Token 预算** 控制加入多少较早的译文，并优先保留较新的页面。当前页面、指令、术语表和生成回复还需要额外的上下文空间。默认值为 `4096`。
+  - 较大预算可提供更多剧情上下文并减少旧页淘汰，但会发送更多输入，可能需要更长时间。本地模型还可能显著增加内存/显存占用。默认值 `4096` 是特意设置的保守选择；DeepSeek 等具有较大上下文窗口的主流服务通常可以使用更高上限。模型上下文上限的约 70% 可作为合理上限（128K 模型约为 `90000`）。
+  - 历史预算也会影响提示词缓存。历史在预算内增长时，连续请求会保留相同的开头，OpenAI、DeepSeek 等服务可按折扣价复用这些输入 token，并可能降低延迟。预算迫使程序淘汰旧页后，公共开头会改变，缓存复用随之重置。较大预算可减少重置次数，但也会发送更多历史，因此总费用不一定更低。
+
+  下表以 DeepSeek 为例，对普通漫画页面进行粗略估算；其缓存输入 token 的价格为普通输入 token 的 10%。实际结果会因项目、模型和服务商而异。
+
+  | 历史预算 (tokens) | 预计保留的翻译历史（页） | 相对不使用历史的预计总费用 |
+  |---:|---:|---:|
+  | `2048` | 3–4 | 1.65× |
+  | `4096` | 6–9 | 1.79× |
+  | `8192` | 12–19 | 2.10× |
+  | `16384` | 23–38 | 2.66× |
+
+  **可复用术语表**
+
+  - 在运行对话框中设置 **术语表**，可使用 UTF-8 编码的 `.json`、`.txt` 或 `.tsv` 文件。文件只会被读取，并可在多个项目间复用。
+  - **仅匹配** 只发送原词出现在相关页面中的条目；**全表** 会发送全部条目，可能明显增加 token 用量。
+  - 支持以下格式：
+
+    ```text
+    # Sakura 格式文本
+    原词->译词 # 可选备注
+
+    # 制表符分隔文本
+    原词<TAB>译词<TAB>可选备注
+    ```
+
+    ```json
+    [
+      {"src": "原词", "dst": "译词", "info": "可选备注"}
+    ]
+    ```
+
+  - 匹配不区分大小写，并按字面文本匹配。条目冲突、文件格式错误、不支持的扩展名或文件不存在时，翻译会在发送 LLM 请求前停止。
+  - 历史页面上下文和术语表注入只对 `LLMTranslator` 生效，其他翻译器会忽略这些设置。
+
+  </details>
 
 * 适用于条漫
 
@@ -64,9 +120,7 @@ curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts
 
 如果系统没有 `curl`，也可以用 `wget -O ...` 下载脚本。安装完成后会自动启动程序；之后可运行 `cd BallonsTranslator && ./launch.sh` 再次启动。  
 
-启动程序会检查核心依赖；选择需要额外库的模块时，程序会提示安装缺失的可选依赖（也可在设置中启用自动安装）。如果模型下载失败，请检查网络代理，或者从 [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) 或 [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) 下载所需模型后手动放置到 `data` 目录下。
-
-软件已内置更新检查，详见设置->启动与更新。  
+启动程序会检查核心依赖；选择需要额外库的模块时，程序会提示安装缺失的可选依赖（也可在设置中启用自动安装）。
 
 ## 一键翻译
 **建议在命令行终端下运行程序**，首次运行请先配置好源语言/目标语言，打开一个带图片的文件夹，点击 Run 等待翻译完成  

@@ -1,18 +1,23 @@
-> [!IMPORTANT]  
-> **번역 결과물을 공개적으로 공유할 때 숙련된 번역가가 번역이나 교정에 참여하지 않았다면, 기계 번역임을 잘 보이는 곳에 표시해 주세요.**
+<p align="center">
+  <img
+    width="256"
+    alt="Spinning fox animation"
+    src="https://github.com/user-attachments/assets/fe44e9a6-c7da-4bc5-8421-87fd6c38a0ba"
+  />
+</p>
 
-# BallonTranslator
-[简体中文](/README.md) | [English](/README_EN.md) | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md)
+<h1 align="center">BallonsTranslator</h1>
 
-딥러닝으로 구동되는 또 다른 컴퓨터 지원 만화/만화 번역 툴.
+<p align="center">딥러닝으로 구동되는 또 다른 컴퓨터 지원 만화/만화 번역 툴.</p>
 
-<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
-
-<p align=center>
-미리보기
+<p align="center">
+  <a href="/README.md">简体中文</a> | <a href="/README_EN.md">English</a> | <a href="/doc/README_RU.md">Русский</a> | <a href="/doc/README_JA.md">日本語</a> | <a href="/doc/README_ES.md">Español</a> | <a href="/doc/README_FR.md">Français</a> | <a href="/doc/README_PT-BR.md">pt-BR</a> | 한국어 | <a href="/doc/README_ID.md">Indonesia</a> | <a href="/doc/README_VI.md">Tiếng Việt</a>
 </p>
 
 # 특징
+> [!IMPORTANT]
+> **번역 결과물을 공개적으로 공유할 때 숙련된 번역가가 번역이나 교정에 참여하지 않았다면, 기계 번역임을 잘 보이는 곳에 표시해 주세요.**
+
 * 완전 자동화된 번역
   - 자동 텍스트 감지, 인식, 제거 및 번역을 지원합니다. 전반적인 성능은 이러한 모듈에 따라 좌우집니다.
   - 대사는 원본 텍스트의 서식 추정치를 기반으로 합니다.
@@ -27,6 +32,50 @@
   - 풍부한 텍스트 포맷 지원 [텍스트 스타일 프리셋](https://github.com/dmMaze/BallonsTranslator/pull/311) 및, 번역된 텍스트는 대화형으로 편집할 수 있습니다.
   - 찾기 & 바꾸기 지원
   - 워드 문서를 불러오기/내보내기 지원
+
+* <details>
+  <summary><i>문맥 인식 LLM 번역</i></summary>
+
+  **번역 기록**
+
+  - **LLM Context**를 **+history**로 설정하면 `LLMTranslator`가 이전 완료 페이지를 예시로 참고합니다. 인명, 용어, 말투의 일관성을 높이는 데 도움이 됩니다. 이어서 실행하거나 선택한 범위에서도 적합한 이전 페이지를 사용할 수 있습니다.
+  - **Token budget**은 이전 번역문을 얼마나 포함할지 정하며 최근 페이지를 우선합니다. 현재 페이지, 지침, 용어집, 생성 응답에는 추가 공간이 필요합니다. 기본값은 `4096`입니다.
+  - 예산을 늘리면 이야기 문맥이 많아지고 오래된 페이지를 덜 자주 제거하지만, 입력이 늘어 느려질 수 있습니다. 로컬 모델은 RAM/VRAM도 크게 더 필요할 수 있습니다. 기본값 `4096`은 의도적으로 보수적인 값입니다. DeepSeek처럼 컨텍스트 창이 큰 일반적인 공급자는 더 높은 제한을 사용할 수 있는 경우가 많습니다. 모델 컨텍스트 한도의 약 70%가 합리적인 상한입니다(128K는 `90000`).
+  - 기록 예산은 프롬프트 캐싱에도 영향을 줍니다. 기록이 예산 안에서 늘어나는 동안 연속 요청은 같은 앞부분을 유지하므로 OpenAI와 DeepSeek 같은 공급자가 입력 토큰을 할인된 가격으로 재사용하고 지연 시간을 줄일 수 있습니다. 예산 때문에 오래된 페이지를 제거하면 앞부분이 바뀌어 캐시 재사용이 초기화됩니다. 예산이 크면 초기화 횟수는 줄지만 더 많은 기록을 보내므로 총비용이 반드시 낮아지는 것은 아닙니다.
+
+  아래 표는 DeepSeek를 사용한 만화 페이지의 대략적인 예시입니다. DeepSeek의 캐시된 입력 토큰 가격은 일반 입력 토큰의 10%입니다. 실제 결과는 프로젝트, 모델, 공급자에 따라 달라집니다.
+
+  | Token budget | 예상 유지 기록(페이지) | 기록을 사용하지 않을 때와 비교한 예상 총비용 |
+  |---:|---:|---:|
+  | `2048` | 3–4 | 1.65× |
+  | `4096` | 6–9 | 1.79× |
+  | `8192` | 12–19 | 2.10× |
+  | `16384` | 23–38 | 2.66× |
+
+  **재사용 가능한 용어집**
+
+  - 실행 대화 상자의 **Glossary File**에 UTF-8 `.json`, `.txt` 또는 `.tsv` 파일을 지정하세요. 파일은 읽기 전용이며 여러 프로젝트에서 재사용할 수 있습니다.
+  - **Matching**은 해당 페이지에 원문 용어가 나타나는 항목만 전송합니다. **All**은 모든 항목을 전송하므로 훨씬 더 많은 토큰을 사용할 수 있습니다.
+  - 지원 형식:
+
+    ```text
+    # Sakura 형식 텍스트
+    원문->번역문 # 선택 사항인 메모
+
+    # 탭으로 구분된 텍스트
+    원문<TAB>번역문<TAB>선택 사항인 메모
+    ```
+
+    ```json
+    [
+      {"src": "원문", "dst": "번역문", "info": "선택 사항인 메모"}
+    ]
+    ```
+
+  - 일치는 대소문자를 구분하지 않는 리터럴 방식입니다. 서로 충돌하는 항목, 잘못된 파일, 지원하지 않는 형식, 누락된 파일이 있으면 LLM 요청을 보내기 전에 번역이 중단됩니다.
+  - 이전 페이지 문맥과 용어집 삽입은 `LLMTranslator`에만 적용되며 다른 번역기는 이 설정을 무시합니다.
+
+  </details>
 
 # 설치
 
@@ -60,9 +109,7 @@ curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts
 
 `curl`을 사용할 수 없으면 대신 `wget -O ...`로 스크립트를 다운로드하세요. 설치 후 앱이 자동으로 시작됩니다. 이후에는 `cd BallonsTranslator && ./launch.sh`를 사용해 다시 실행할 수 있습니다.
 
-앱은 시작 시 핵심 의존성을 확인합니다. 추가 라이브러리가 필요한 모듈을 선택하면 누락된 선택 의존성 설치를 안내합니다(설정에서 자동 설치도 활성화할 수 있습니다). 모델 다운로드가 실패하면 네트워크/프록시를 확인하거나 필요한 모델을 [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) 또는 [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing)에서 다운로드한 뒤 `data` 디렉터리에 수동으로 넣어 주세요.
-
-소프트웨어에는 업데이트 확인 기능이 내장되어 있습니다. 자세한 내용은 설정 패널 -> Startup & Update를 참조하세요.
+앱은 시작 시 핵심 의존성을 확인합니다. 추가 라이브러리가 필요한 모듈을 선택하면 누락된 선택 의존성 설치를 안내합니다(설정에서 자동 설치도 활성화할 수 있습니다).
 
 # 사용법
 

@@ -1,12 +1,17 @@
-# BallonTranslator
-[简体中文](/README.md) | [English](/README_EN.md) | [Русский](/doc/README_RU.md) | [日本語](/doc/README_JA.md) | [Español](/doc/README_ES.md) | [Français](/doc/README_FR.md) | [pt-BR](/doc/README_PT-BR.md) | [한국어](/doc/README_KO.md) | [Indonesia](/doc/README_ID.md) | [Tiếng Việt](/doc/README_VI.md)
+<p align="center">
+  <img
+    width="256"
+    alt="Spinning fox animation"
+    src="https://github.com/user-attachments/assets/fe44e9a6-c7da-4bc5-8421-87fd6c38a0ba"
+  />
+</p>
 
-Lại thêm một công cụ, phần mềm dịch truyện siu xịn khác có áp dụng ML/AI.
+<h1 align="center">BallonsTranslator</h1>
 
-<img src="https://github.com/user-attachments/assets/2140c402-dda2-47bc-9e7f-83ed41ce78af" div align=center>
+<p align="center">Lại thêm một công cụ, phần mềm dịch truyện siu xịn khác có áp dụng ML/AI.</p>
 
-<p align=center>
-preview
+<p align="center">
+  <a href="/README.md">简体中文</a> | <a href="/README_EN.md">English</a> | <a href="/doc/README_RU.md">Русский</a> | <a href="/doc/README_JA.md">日本語</a> | <a href="/doc/README_ES.md">Español</a> | <a href="/doc/README_FR.md">Français</a> | <a href="/doc/README_PT-BR.md">pt-BR</a> | <a href="/doc/README_KO.md">한국어</a> | <a href="/doc/README_ID.md">Indonesia</a> | Tiếng Việt
 </p>
 
 # Đặc trưng
@@ -24,6 +29,50 @@ preview
   - Hỗ trợ RTF (rich text formatting) zà [TSP (text style presets)](https://github.com/dmMaze/BallonsTranslator/pull/311), có thể chỉnh sửa lại các văn bản đã được dịch đó lun nè.
   - Hỗ trợ Tìm kiếm & Thay thế
   - Hỗ trợ cả import từ dạng word hoặc export ra dạng đó nữa
+
+* <details>
+  <summary><i>Dịch bằng LLM có nhận biết ngữ cảnh</i></summary>
+
+  **Lịch sử bản dịch**
+
+  - Đặt **LLM Context** thành **+history** để cho `LLMTranslator` xem ví dụ từ các trang trước đã hoàn thành. Điều này giúp tên, thuật ngữ và giọng điệu nhất quán hơn. Khi tiếp tục hoặc dịch một phạm vi, các trang đủ điều kiện trước đó cũng có thể được dùng.
+  - **Token budget** kiểm soát lượng văn bản dịch trước đó được đưa vào và ưu tiên các trang mới hơn. Trang hiện tại, chỉ dẫn, bảng thuật ngữ và phản hồi được tạo cần thêm không gian. Mặc định là `4096`.
+  - Ngân sách lớn hơn cung cấp nhiều ngữ cảnh câu chuyện hơn và ít loại bỏ trang cũ hơn, nhưng gửi nhiều văn bản hơn và có thể chậm hơn. Mô hình cục bộ cũng có thể cần nhiều RAM/VRAM hơn đáng kể. Mặc định `4096` được cố ý đặt ở mức thận trọng; các nhà cung cấp phổ biến có cửa sổ ngữ cảnh lớn như DeepSeek thường có thể dùng giới hạn cao hơn. Khoảng 70% giới hạn ngữ cảnh của mô hình là mức trần hợp lý (`90000` cho 128K).
+  - Ngân sách lịch sử cũng ảnh hưởng đến bộ nhớ đệm lời nhắc. Khi lịch sử tăng trong giới hạn ngân sách, các yêu cầu liên tiếp giữ nguyên phần đầu để nhà cung cấp như OpenAI và DeepSeek có thể tái sử dụng với giá token đầu vào thấp hơn và đôi khi giảm độ trễ. Khi ngân sách buộc phải loại bỏ trang cũ, phần đầu đó thay đổi và việc tái sử dụng bộ nhớ đệm được đặt lại. Ngân sách lớn hơn giúp giảm số lần đặt lại nhưng gửi nhiều lịch sử hơn, nên không đảm bảo tổng chi phí thấp hơn.
+
+  Bảng dưới đây là ước tính sơ bộ cho các trang manga khi dùng DeepSeek, trong đó token đầu vào đã lưu đệm có giá bằng 10% token đầu vào thông thường. Kết quả thực tế thay đổi theo dự án, mô hình và nhà cung cấp.
+
+  | Token budget | Lịch sử ước tính được giữ lại (trang) | Tổng chi phí ước tính so với không dùng lịch sử |
+  |---:|---:|---:|
+  | `2048` | 3–4 | 1.65× |
+  | `4096` | 6–9 | 1.79× |
+  | `8192` | 12–19 | 2.10× |
+  | `16384` | 23–38 | 2.66× |
+
+  **Bảng thuật ngữ có thể tái sử dụng**
+
+  - Đặt **Glossary File** trong hộp thoại Run thành một tệp UTF-8 `.json`, `.txt` hoặc `.tsv`. Tệp chỉ được đọc và có thể tái sử dụng trong nhiều dự án.
+  - **Matching** chỉ gửi các mục có thuật ngữ nguồn xuất hiện trên trang liên quan. **All** gửi mọi mục và có thể sử dụng nhiều token hơn đáng kể.
+  - Các định dạng được hỗ trợ gồm:
+
+    ```text
+    # Văn bản kiểu Sakura
+    nguồn->bản dịch # ghi chú tùy chọn
+
+    # Văn bản phân tách bằng tab
+    nguồn<TAB>bản dịch<TAB>ghi chú tùy chọn
+    ```
+
+    ```json
+    [
+      {"src": "nguồn", "dst": "bản dịch", "info": "ghi chú tùy chọn"}
+    ]
+    ```
+
+  - Việc đối chiếu là đối chiếu theo nghĩa đen và không phân biệt chữ hoa chữ thường. Các mục xung đột, tệp sai định dạng, định dạng không được hỗ trợ và tệp bị thiếu sẽ dừng quá trình dịch trước khi gửi yêu cầu đến LLM.
+  - Ngữ cảnh từ các trang trước và việc chèn bảng thuật ngữ chỉ áp dụng cho `LLMTranslator`; các trình dịch khác bỏ qua những cài đặt này.
+
+  </details>
 
 # Cài đặt
 
@@ -57,9 +106,7 @@ curl -fLO https://raw.githubusercontent.com/dmMaze/BallonsTranslator/dev/scripts
 
 Nếu không có `curl`, hãy tải script bằng `wget -O ...`. Ứng dụng sẽ tự khởi động sau khi cài đặt; những lần sau dùng `cd BallonsTranslator && ./launch.sh` để mở lại.
 
-Ứng dụng kiểm tra các phụ thuộc cốt lõi khi khởi động. Khi bạn chọn một mô-đun cần thư viện bổ sung, ứng dụng sẽ nhắc cài các phụ thuộc tùy chọn còn thiếu (bạn cũng có thể bật tự động cài đặt trong phần cài đặt). Nếu tải model thất bại, hãy kiểm tra mạng/proxy, hoặc tải các model cần thiết từ [MEGA](https://mega.nz/folder/gmhmACoD#dkVlZ2nphOkU5-2ACb5dKw) hoặc [Google Drive](https://drive.google.com/drive/folders/1uElIYRLNakJj-YS0Kd3r3HE-wzeEvrWd?usp=sharing) rồi đặt thủ công vào thư mục `data`.
-
-Phần mềm có kiểm tra cập nhật tích hợp; xem Config panel -> Startup & Update để biết chi tiết.
+Ứng dụng kiểm tra các phụ thuộc cốt lõi khi khởi động. Khi bạn chọn một mô-đun cần thư viện bổ sung, ứng dụng sẽ nhắc cài các phụ thuộc tùy chọn còn thiếu (bạn cũng có thể bật tự động cài đặt trong phần cài đặt).
 
 # Cách sử dụng
 
