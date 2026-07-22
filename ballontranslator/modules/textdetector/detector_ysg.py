@@ -149,10 +149,18 @@ class YSGYoloDetector(TextDetectorBase):
     def is_ysg(self):
         return osp.basename(self.get_param_value('model path').startswith('ysg'))
 
+    def _detect_size(self) -> int:
+        try:
+            return max(32, int(float(self.get_param_value('detect size'))))
+        except (TypeError, ValueError):
+            self.logger.warning('Invalid ysgyolo detect size, falling back to 1024')
+            return 1024
+
     def _detect(self, img: np.ndarray, proj: ProjImgTrans = None) -> Tuple[np.ndarray, List[TextBlock]]:
         result = self.model.predict(
             source=img, save=False, show=False, verbose=False,
             conf=self.get_param_value('confidence threshold'), iou=self.get_param_value('IoU threshold'),
+            imgsz=self._detect_size(),
             agnostic_nms=True
         )[0]
 

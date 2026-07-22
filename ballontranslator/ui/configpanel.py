@@ -6,7 +6,7 @@ from qtpy.QtWidgets import (
     QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox,
     QSplitter, QScrollArea, QLineEdit, QStackedWidget, QMessageBox,
     QListWidget, QSpinBox, QProgressDialog, QFileDialog, QListWidgetItem,
-    QFrame,
+    QFrame, QDialog,
 )
 from qtpy.QtCore import Qt, Signal, QSize, QEvent, QItemSelection, QTimer
 from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent
@@ -30,6 +30,7 @@ from ballontranslator.utils.shared import (
     CONFIG_CONTENT_ROW_SPACING,
     CONFIG_FONTSIZE_CONTENT,
     CONFIG_FONTSIZE_TABLE,
+    HEADLESS,
     ON_MACOS,
     ON_WINDOWS,
     PROGRAM_PATH,
@@ -418,7 +419,10 @@ class ConfigTable(QTreeView):
                 self.section_pressed.emit(section_key)
 
 
-class ConfigPanel(FramelessWindow):
+ConfigPanelBase = QDialog if HEADLESS else FramelessWindow
+
+
+class ConfigPanel(ConfigPanelBase):
     """Non-modal frameless settings window.
 
     >>> issubclass(ConfigPanel, FramelessWindow)
@@ -451,7 +455,7 @@ class ConfigPanel(FramelessWindow):
         if not opaque_frame:
             self.setAttribute(widget_attribute.WA_TranslucentBackground)
         self.setAttribute(widget_attribute.WA_StyledBackground)
-        if ON_MACOS:
+        if ON_MACOS and not HEADLESS:
             self.windowEffect.removeShadowEffect(self.winId())
         self.resize(900, 720)
         self.setMinimumSize(720, 520)

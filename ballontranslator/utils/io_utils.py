@@ -54,9 +54,21 @@ class NumpyEncoder(json.JSONEncoder):
             return serialize_np(obj)
         return json.JSONEncoder.default(self, obj)
 
+def is_macos_metadata_file(filename: str) -> bool:
+    """Return whether filename is a macOS AppleDouble sidecar file.
+
+    >>> is_macos_metadata_file('._001.jpg')
+    True
+    >>> is_macos_metadata_file('001.jpg')
+    False
+    """
+    return filename.startswith('._')
+
 def find_all_imgs(img_dir, abs_path=False, sort=False):
     imglist = []
     for filename in os.listdir(img_dir):
+        if is_macos_metadata_file(filename):
+            continue
         file_suffix = Path(filename).suffix
         if file_suffix.lower() not in IMG_EXT:
             continue
@@ -121,6 +133,8 @@ def find_tif_files(img_dir, abs_path=False, sort=False):
     """
     imglist = []
     for filename in os.listdir(img_dir):
+        if is_macos_metadata_file(filename):
+            continue
         file_suffix = Path(filename).suffix.lower()
         if file_suffix in ['.tif', '.tiff']:
             if abs_path:
