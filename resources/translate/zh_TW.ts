@@ -2391,6 +2391,14 @@ All existing translation results will be cleared!</source>
         <translation>檢測文本</translation>
     </message>
     <message>
+        <source>Keep all text, only text inside speech bubbles, or only text outside speech bubbles.</source>
+        <translation>保留全部文本、僅保留對話氣泡內文本，或僅保留對話氣泡外文本。</translation>
+    </message>
+    <message>
+        <source>Text Region Filter</source>
+        <translation>文本區域篩選</translation>
+    </message>
+    <message>
         <location filename="../../ballontranslator/ui/_generated/module_param_i18n_catalog.py" line="335"/>
         <location filename="../../ballontranslator/ui/_generated/module_param_i18n_catalog_linux.py" line="365"/>
         <source>Dilation kernel size (px) for the inpaint mask. Merges text fragments.</source>
